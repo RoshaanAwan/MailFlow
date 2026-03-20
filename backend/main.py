@@ -44,6 +44,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    print(f"DEBUG: Request {request.method} {request.url}")
+    response = await call_next(request)
+    print(f"DEBUG: Response status {response.status_code}")
+    return response
+
 # OAuth Configuration
 CLIENT_SECRET_FILE = "client_secret.json"
 SCOPES = [

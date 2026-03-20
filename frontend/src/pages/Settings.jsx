@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { auth } from "../App";
 import { updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "firebase/auth";
 
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API = import.meta.env.VITE_API_URL || "/api";
 
 const s = {
   title:  { fontSize:24, fontWeight:700, color:"#f0f0f0", marginBottom:6, letterSpacing:"-0.5px" },
