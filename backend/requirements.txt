@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+python-multipart
+gspread
+google-auth
+pandas
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+python-jose
+passlib
+firebase-admin
+python-dotenv
+passlib
+python-jose

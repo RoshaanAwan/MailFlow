@@ -1,0 +1,31 @@
+# Environment variables
+.env
+.env.local
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+env/
+venv/
+.env
+
+# Credentials
+backend/client_secret.json
+backend/firebase_service_account.json
+credentials.json
+gmail_credentials.json
+
+# Logs
+*.log
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# IDEs
+.vscode/
+.idea/
+.DS_Store
