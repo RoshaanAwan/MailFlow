@@ -54,6 +54,7 @@ SCOPES = [
     "openid"
 ]
 REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/gmail/callback")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 security = HTTPBearer()
 
@@ -275,7 +276,8 @@ def auth_callback(state: str, code: str):
         
     creds = flow.credentials
     user_tokens[state] = json.loads(creds.to_json())
-    return RedirectResponse(url="http://localhost:3000/settings")
+    print(f"DEBUG: Token stored for uid={state}. Total tokens: {len(user_tokens)}")
+    return RedirectResponse(url=f"{FRONTEND_URL}/settings")
 
 @app.get("/auth/gmail/status")
 def google_status(user=Depends(get_current_user)):
