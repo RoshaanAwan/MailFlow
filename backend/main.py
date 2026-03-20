@@ -69,31 +69,46 @@ def get_google_client_config():
     """Returns Google Client Config from env or file."""
     env_json = os.getenv("GOOGLE_CLIENT_SECRET_JSON")
     if env_json:
+        # Strip potential single or double quotes at ends
+        env_json = env_json.strip().strip("'").strip('"')
         try:
             return json.loads(env_json)
         except Exception as e:
-            print(f"Error parsing GOOGLE_CLIENT_SECRET_JSON: {e}")
+            print(f"ERROR: Failed to parse GOOGLE_CLIENT_SECRET_JSON: {e}")
+
     if os.path.exists(CLIENT_SECRET_FILE):
         with open(CLIENT_SECRET_FILE, "r") as f:
             return json.load(f)
     return None
 
 # Firebase Admin SDK
+firebase_initialized = False
 try:
     if not firebase_admin._apps:
         fb_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
         if fb_json:
+            fb_json = fb_json.strip().strip("'").strip('"')
             try:
                 cred_dict = json.loads(fb_json)
                 cred = fb_creds.Certificate(cred_dict)
                 firebase_admin.initialize_app(cred)
+                firebase_initialized = True
+                print("DEBUG: Firebase Admin initialized from environment variable.")
             except Exception as e:
-                print(f"Error initializing Firebase from env: {e}")
-        elif os.path.exists("firebase_service_account.json"):
+                print(f"ERROR: Failed to parse/initialize Firebase from JSON: {e}")
+        
+        if not firebase_initialized and os.path.exists("firebase_service_account.json"):
             cred = fb_creds.Certificate("firebase_service_account.json")
             firebase_admin.initialize_app(cred)
+            firebase_initialized = True
+            print("DEBUG: Firebase Admin initialized from file.")
+
+    if not firebase_admin._apps and not firebase_initialized:
+        print("WARNING: Firebase Admin NOT initialized. Authentication will fail.")
 except Exception as e:
-    print(f"Firebase initialization error: {e}")
+    print(f"ERROR: Firebase initialization failure: {e}")
+
+
 
 # ============================================================
 #  IN-MEMORY STORES
@@ -108,11 +123,15 @@ auth_verifiers = {} # { state: verifier }
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
-        decoded = fb_auth.verify_id_token(credentials.credentials)
+        token = credentials.credentials
+        decoded = fb_auth.verify_id_token(token)
         return decoded
     except Exception as e:
         print(f"DEBUG: Firebase auth error: {e}")
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+        raise HTTPException(
+            status_code=401, 
+            detail=f"Authentication failed: {str(e)}"
+        )
 
 def get_user_creds(uid: str):
     if uid not in user_tokens:

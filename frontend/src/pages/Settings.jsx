@@ -55,7 +55,13 @@ export default function Settings({ user }) {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
-      setGoogleStatus(data);
+      if (res.ok) {
+        setGoogleStatus(data);
+      } else {
+        console.error("Google status error detaill:", data.detail);
+        // Maybe set a helpful message or stay disconnected
+        setGoogleStatus({ connected: false, error: data.detail });
+      }
     } catch (e) {
       console.error("Google status error:", e);
     }
@@ -210,9 +216,19 @@ export default function Settings({ user }) {
             </div>
           </div>
         ) : (
-          <button style={s.gbtn} onClick={connectGoogle}>
-            <span style={{ fontSize:18 }}>G</span> Connect Google Account
-          </button>
+          <div>
+            <button style={{ ...s.gbtn, marginBottom: googleStatus.error ? 12 : 0 }} onClick={connectGoogle}>
+              <span style={{ fontSize:18 }}>G</span> Connect Google Account
+            </button>
+            {googleStatus.error && (
+              <div style={s.err}>
+                <strong>Connection Error:</strong> {googleStatus.error}
+                <p style={{ marginTop:4, fontSize:11, opacity:0.8 }}>
+                  Check your backend environment variables (Firebase Service Account).
+                </p>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
