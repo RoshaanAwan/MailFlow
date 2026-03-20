@@ -7,7 +7,6 @@ import NewCampaign from "./pages/NewCampaign";
 import Settings from "./pages/Settings";
 import Sidebar from "./components/Sidebar";
 
-// ⚠️ Replace with your Firebase config from Firebase Console
 const firebaseConfig = {
   apiKey: "AIzaSyAexpdue23445DL1WeogZNeCTSXkhJvsyg",
   authDomain: "emailscript-22620.firebaseapp.com",
@@ -24,9 +23,17 @@ export const auth = getAuth(firebaseApp);
 export default function App() {
   const [user, setUser]       = useState(null);
   const [loading, setLoading] = useState(true);
-  const [page, setPage]       = useState("dashboard");
+  const [page, setPage]       = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("page") || "dashboard";
+  });
 
   useEffect(() => {
+    // Clear URL query params after picking them up to keep the URL clean
+    if (window.location.search.includes("page=")) {
+      window.history.replaceState({}, document.title, "/");
+    }
+
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setLoading(false);

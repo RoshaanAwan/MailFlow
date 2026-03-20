@@ -84,7 +84,7 @@ npm run dev
 
 **Roshaan Ali**
 *   GitHub: [@RoshaanAwan](https://github.com/RoshaanAwan)
-*   LinkedIn: [Roshaan Ali](https://linkedin.com/in/roshaan-ali-dev)
+*   LinkedIn: [Roshaan Ali](https://linkedin.com/in/roshaan-awan)
 
 ---
 <div align="center">

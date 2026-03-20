@@ -277,7 +277,7 @@ def auth_callback(state: str, code: str):
     creds = flow.credentials
     user_tokens[state] = json.loads(creds.to_json())
     print(f"DEBUG: Token stored for uid={state}. Total tokens: {len(user_tokens)}")
-    return RedirectResponse(url=f"{FRONTEND_URL}/settings")
+    return RedirectResponse(url=f"{FRONTEND_URL}/?page=settings")
 
 @app.get("/auth/gmail/status")
 def google_status(user=Depends(get_current_user)):
