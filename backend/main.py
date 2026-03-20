@@ -53,7 +53,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/userinfo.email",
     "openid"
 ]
-REDIRECT_URI = "http://localhost:8000/auth/gmail/callback"
+REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/gmail/callback")
 
 security = HTTPBearer()
 
