@@ -5,6 +5,8 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import NewCampaign from "./pages/NewCampaign";
 import Settings from "./pages/Settings";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
+import TermsOfService from "./pages/TermsOfService";
 import Sidebar from "./components/Sidebar";
 
 const firebaseConfig = {
@@ -47,15 +49,20 @@ export default function App() {
     </div>
   );
 
-  if (!user) return <Login />;
+  const isPublicPage = page === "privacy" || page === "terms";
+
+  if (!user && !isPublicPage) return <Login setPage={setPage} />;
 
   return (
     <div style={{ display:"flex", minHeight:"100vh", fontFamily:"'DM Sans', sans-serif", background:"#0f0f0f", color:"#f0f0f0" }}>
-      <Sidebar page={page} setPage={setPage} user={user} />
-      <main style={{ flex:1, padding:"2rem", overflowY:"auto" }}>
+      {user && <Sidebar page={page} setPage={setPage} user={user} />}
+      <main style={{ flex:1, padding: isPublicPage ? "0" : "2rem", overflowY:"auto" }}>
         {page === "dashboard"    && <Dashboard user={user} />}
         {page === "new-campaign" && <NewCampaign user={user} setPage={setPage} />}
         {page === "settings"     && <Settings user={user} />}
+        {page === "privacy"      && <PrivacyPolicy onBack={() => setPage(user ? "dashboard" : "login")} />}
+        {page === "terms"        && <TermsOfService onBack={() => setPage(user ? "dashboard" : "login")} />}
+        {(page === "login" && !user) && <Login setPage={setPage} />}
       </main>
     </div>
   );

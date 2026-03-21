@@ -32,6 +32,11 @@ export default function Sidebar({ page, setPage, user }) {
         </div>
       ))}
       <div style={s.bottom}>
+        <div style={{ padding: "8px 12px", display: "flex", gap: "8px", fontSize: "11px", color: "#444" }}>
+          <span style={{ cursor: "pointer" }} onClick={() => setPage("privacy")}>Privacy</span>
+          <span>•</span>
+          <span style={{ cursor: "pointer" }} onClick={() => setPage("terms")}>Terms</span>
+        </div>
         <div style={s.user}>{user.email}</div>
         <div style={s.signout} onClick={() => signOut(auth)}>Sign out</div>
       </div>
