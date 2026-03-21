@@ -21,7 +21,7 @@ const s = {
   err:     { fontSize:13, color:"#ff6b6b", marginBottom:12, textAlign:"center" },
 };
 
-export default function Login() {
+export default function Login({ setPage }) {
   const [isSignup, setIsSignup] = useState(false);
   const [email, setEmail]       = useState("");
   const [password, setPassword] = useState("");
@@ -52,23 +52,31 @@ export default function Login() {
 
   return (
     <div style={s.wrap}>
-      <div style={s.card}>
-        <div style={s.logo}>✉ MailFlow</div>
-        <div style={s.sub}>{isSignup ? "Create your account" : "Welcome back"}</div>
-        {error && <div style={s.err}>{error}</div>}
-        <label style={s.label}>Email</label>
-        <input style={s.input} type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" />
-        <label style={s.label}>Password</label>
-        <input style={s.input} type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&handleSubmit()} />
-        <button style={s.btn} onClick={handleSubmit} disabled={loading}>
-          {loading ? "Please wait..." : isSignup ? "Create account" : "Sign in"}
-        </button>
-        <button style={s.gbtn} onClick={handleGoogle}>Continue with Google</button>
-        <div style={s.toggle}>
-          {isSignup ? "Already have an account? " : "Don't have an account? "}
-          <span style={s.tlink} onClick={()=>setIsSignup(!isSignup)}>
-            {isSignup ? "Sign in" : "Sign up"}
-          </span>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2rem" }}>
+        <div style={s.card}>
+          <div style={s.logo}>✉ MailFlow</div>
+          <div style={s.sub}>{isSignup ? "Create your account" : "Welcome back"}</div>
+          {error && <div style={s.err}>{error}</div>}
+          <label style={s.label}>Email</label>
+          <input style={s.input} type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" />
+          <label style={s.label}>Password</label>
+          <input style={s.input} type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&handleSubmit()} />
+          <button style={s.btn} onClick={handleSubmit} disabled={loading}>
+            {loading ? "Please wait..." : isSignup ? "Create account" : "Sign in"}
+          </button>
+          <button style={s.gbtn} onClick={handleGoogle}>Continue with Google</button>
+          <div style={s.toggle}>
+            {isSignup ? "Already have an account? " : "Don't have an account? "}
+            <span style={s.tlink} onClick={()=>setIsSignup(!isSignup)}>
+              {isSignup ? "Sign in" : "Sign up"}
+            </span>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: "1rem", fontSize: "12px", color: "#444" }}>
+          <span style={{ cursor: "pointer", transition: "color 0.2s" }} onMouseOver={(e) => e.target.style.color = "#888"} onMouseOut={(e) => e.target.style.color = "#444"} onClick={() => setPage("privacy")}>Privacy Policy</span>
+          <span>•</span>
+          <span style={{ cursor: "pointer", transition: "color 0.2s" }} onMouseOver={(e) => e.target.style.color = "#888"} onMouseOut={(e) => e.target.style.color = "#444"} onClick={() => setPage("terms")}>Terms of Service</span>
         </div>
       </div>
     </div>
