@@ -7,7 +7,7 @@ RUN:
   uvicorn main:app --reload --port 8000
 """
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, BackgroundTasks, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import RedirectResponse
@@ -19,6 +19,7 @@ import io
 import os
 import base64
 import json
+import uuid
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
@@ -124,11 +125,36 @@ init_firebase()
 
 
 # ============================================================
-#  IN-MEMORY STORES
+#  PERSISTENT STORES (JSON)
 # ============================================================
+STORAGE_FILE = "storage_data.json"
+
+def load_data():
+    global user_tokens, campaigns
+    if os.path.exists(STORAGE_FILE):
+        try:
+            with open(STORAGE_FILE, "r") as f:
+                data = json.load(f)
+                user_tokens = data.get("user_tokens", {})
+                campaigns = data.get("campaigns", {})
+                print(f"DEBUG: Loaded persistence state. {len(user_tokens)} users, {len(campaigns)} campaigns.")
+        except Exception as e:
+            print(f"ERROR: Loading storage failed: {e}")
+
+def save_data():
+    try:
+        data = {"user_tokens": user_tokens, "campaigns": campaigns}
+        with open(STORAGE_FILE, "w") as f:
+            json.dump(data, f)
+    except Exception as e:
+        print(f"ERROR: Saving storage failed: {e}")
+
 user_tokens = {}  # { uid: credentials_dict }
 campaigns = {}    # { campaign_id: status_dict }
 auth_verifiers = {} # { state: verifier }
+
+# Initial load
+load_data()
 
 # ============================================================
 #  HELPERS
@@ -270,6 +296,7 @@ def send_campaign_task(campaign_id: str, contacts: list, config: CampaignRequest
         time.sleep(config.delay_seconds)
 
     campaigns[campaign_id]["status"] = "completed"
+    save_data()
 
 # ============================================================
 #  GOOGLE OAUTH ROUTES
@@ -323,6 +350,7 @@ def auth_callback(state: str, code: str):
         
     creds = flow.credentials
     user_tokens[state] = json.loads(creds.to_json())
+    save_data()
     print(f"DEBUG: Token stored for uid={state}. Total tokens: {len(user_tokens)}")
     return RedirectResponse(url=f"{FRONTEND_URL}/?page=settings")
 
@@ -338,6 +366,7 @@ def google_disconnect(user=Depends(get_current_user)):
     uid = user["uid"]
     if uid in user_tokens:
         del user_tokens[uid]
+        save_data()
     return {"message": "Google account disconnected"}
 
 # ============================================================
@@ -393,12 +422,31 @@ def root():
 async def start_campaign(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    campaign: CampaignRequest = Depends(),
+    campaign_name: str = Form(...),
+    subject: str = Form(...),
+    body: str = Form(...),
+    sender_name: str = Form(...),
+    sender_email: str = Form(...),
+    delay_seconds: int = Form(10),
+    daily_limit: int = Form(20),
+    sheet_name: str = Form("Email Campaign Log"),
     user=Depends(get_current_user)
 ):
     uid = user["uid"]
     if uid not in user_tokens:
         raise HTTPException(status_code=400, detail="Please connect your Google account first in Settings.")
+
+    # Re-wrap in model for passing to background task
+    campaign = CampaignRequest(
+        campaign_name=campaign_name,
+        subject=subject,
+        body=body,
+        sender_name=sender_name,
+        sender_email=sender_email,
+        delay_seconds=delay_seconds,
+        daily_limit=daily_limit,
+        sheet_name=sheet_name
+    )
 
     contents = await file.read()
     try:
@@ -412,7 +460,10 @@ async def start_campaign(
     df = df.fillna("")
     contacts = df.to_dict(orient="records")
 
-    campaign_id = f"{uid}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    # Use UUID suffix to prevent IDs from colliding within the same second
+    campaign_id = f"{uid}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:6]}"
+    # Save initial state
+    save_data()
     background_tasks.add_task(send_campaign_task, campaign_id, contacts, campaign, uid)
 
     return {
@@ -438,6 +489,6 @@ def cancel_campaign(campaign_id: str, user=Depends(get_current_user)):
 def list_campaigns(user=Depends(get_current_user)):
     user_campaigns = {
         k: v for k, v in campaigns.items()
-        if k.startswith(user["uid"])
+        if k.startswith(f"{user['uid']}_")
     }
     return user_campaigns

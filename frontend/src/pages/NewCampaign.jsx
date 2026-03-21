@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { auth } from "../App";
 
 const API = import.meta.env.VITE_API_URL || "/api";
@@ -81,19 +81,18 @@ export default function NewCampaign({ user, setPage }) {
       const token   = await auth.currentUser.getIdToken();
       const formData = new FormData();
       formData.append("file", file);
+      
+      // Send all campaign config as form fields to avoid URL length limits and proxy retries
+      formData.append("campaign_name", form.campaign_name);
+      formData.append("subject",       form.subject);
+      formData.append("body",          form.body);
+      formData.append("sender_name",   form.sender_name);
+      formData.append("sender_email",  form.sender_email);
+      formData.append("delay_seconds", form.delay_seconds);
+      formData.append("daily_limit",   form.daily_limit);
+      formData.append("sheet_name",    form.sheet_name);
 
-      const params = new URLSearchParams({
-        campaign_name: form.campaign_name,
-        subject:       form.subject,
-        body:          form.body,
-        sender_name:   form.sender_name,
-        sender_email:  form.sender_email,
-        delay_seconds: form.delay_seconds,
-        daily_limit:   form.daily_limit,
-        sheet_name:    form.sheet_name,
-      });
-
-      const res  = await fetch(`${API}/campaign/start?${params}`, {
+      const res  = await fetch(`${API}/campaign/start`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body:    formData,
@@ -111,8 +110,13 @@ export default function NewCampaign({ user, setPage }) {
     setLoading(false);
   };
 
-  const pollStatus = async (id, token) => {
-    const interval = setInterval(async () => {
+  const pollInterval = useRef(null);
+
+  const pollStatus = (id, token) => {
+    // Clear any existing poll just in case
+    if (pollInterval.current) clearInterval(pollInterval.current);
+
+    pollInterval.current = setInterval(async () => {
       try {
         const res  = await fetch(`${API}/campaign/${id}/status`, {
           headers: { Authorization: `Bearer ${token}` }
@@ -120,13 +124,21 @@ export default function NewCampaign({ user, setPage }) {
         const data = await res.json();
         setStatus(data);
         if (data.status === "completed" || data.status?.startsWith("error")) {
-          clearInterval(interval);
+          clearInterval(pollInterval.current);
+          pollInterval.current = null;
         }
       } catch (e) {
-        clearInterval(interval);
+        clearInterval(pollInterval.current);
+        pollInterval.current = null;
       }
     }, 2000);
   };
+
+  useEffect(() => {
+    return () => {
+      if (pollInterval.current) clearInterval(pollInterval.current);
+    };
+  }, []);
 
   const cancelCampaign = async () => {
     if (!campaignId) return;
