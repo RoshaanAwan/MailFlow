@@ -81,44 +81,44 @@ def get_google_client_config():
             return json.load(f)
     return None
 
-firebase_initialized = False
-try:
-    if not firebase_admin._apps:
-        fb_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
-        if fb_json:
-            fb_json_clean = fb_json.strip().strip("'").strip('"')
-            print(f"DEBUG: Found FIREBASE_SERVICE_ACCOUNT_JSON env var (len={len(fb_json_clean)})")
-            try:
-                # Basic validation: ensure it starts with { and ends with }
-                if not fb_json_clean.startswith("{") or not fb_json_clean.endswith("}"):
-                    print(f"ERROR: FIREBASE_SERVICE_ACCOUNT_JSON does not look like JSON. Starts with '{fb_json_clean[:10]}...'")
-                else:
-                    cred_dict = json.loads(fb_json_clean)
-                    if "type" not in cred_dict or cred_dict["type"] != "service_account":
-                        print("ERROR: Provided JSON is NOT a Service Account JSON. Check if you accidentally used Client SDK config.")
-                    else:
-                        cred = fb_creds.Certificate(cred_dict)
-                        firebase_admin.initialize_app(cred)
-                        firebase_initialized = True
-                        print("DEBUG: Firebase Admin initialized from environment variable.")
-            except Exception as e:
-                print(f"ERROR: Failed to parse/initialize Firebase from JSON: {e}")
-        else:
-            print("WARNING: FIREBASE_SERVICE_ACCOUNT_JSON environment variable is missing.")
-        
-        if not firebase_initialized and os.path.exists("firebase_service_account.json"):
-            try:
-                cred = fb_creds.Certificate("firebase_service_account.json")
-                firebase_admin.initialize_app(cred)
-                firebase_initialized = True
-                print("DEBUG: Firebase Admin initialized from file.")
-            except Exception as e:
-                print(f"ERROR: Failed to initialize Firebase from file: {e}")
+def init_firebase():
+    """Initializes Firebase Admin SDK from env var or file. Self-healing for Railway private keys."""
+    if firebase_admin._apps:
+        return True
 
-    if not firebase_admin._apps and not firebase_initialized:
-        print("CRITICAL: Firebase Admin NOT initialized. All API calls requiring authentication will fail.")
-except Exception as e:
-    print(f"ERROR: Unhandled Firebase initialization failure: {e}")
+    fb_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+    if fb_json:
+        try:
+            fb_json_clean = fb_json.strip().strip("'").strip('"')
+            cred_dict = json.loads(fb_json_clean)
+            
+            # THE FIX: Replace escaped \\n with real \n in private_key
+            if "private_key" in cred_dict:
+                cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n")
+            
+            cred = fb_creds.Certificate(cred_dict)
+            firebase_admin.initialize_app(cred)
+            print("DEBUG: Firebase initialized successfully from ENV.")
+            return True
+        except Exception as e:
+            print(f"ERROR: Firebase ENV initialization failed: {e}")
+
+    # Fallback to file
+    if os.path.exists("firebase_service_account.json"):
+        try:
+            cred = fb_creds.Certificate("firebase_service_account.json")
+            firebase_admin.initialize_app(cred)
+            print("DEBUG: Firebase initialized successfully from FILE.")
+            return True
+        except Exception as e:
+            print(f"ERROR: Firebase FILE initialization failed: {e}")
+
+    print("CRITICAL: All Firebase initialization attempts failed.")
+    return False
+
+# Try initializing at startup
+init_firebase()
+
 
 
 
@@ -136,10 +136,12 @@ auth_verifiers = {} # { state: verifier }
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     if not firebase_admin._apps:
-        raise HTTPException(
-            status_code=500,
-            detail="Firebase Admin SDK is not initialized. Please check backend server configuration and service account JSON."
-        )
+        # Just-in-time initialization attempt
+        if not init_firebase():
+            raise HTTPException(
+                status_code=500,
+                detail="Firebase Admin SDK is not initialized. Check your FIREBASE_SERVICE_ACCOUNT_JSON env var."
+            )
     
     try:
         token = credentials.credentials
