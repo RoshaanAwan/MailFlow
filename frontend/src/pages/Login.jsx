@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { auth } from "../App";
 import {
   signInWithEmailAndPassword,
@@ -21,7 +22,7 @@ const s = {
   err:     { fontSize:13, color:"#ff6b6b", marginBottom:12, textAlign:"center" },
 };
 
-export default function Login({ setPage }) {
+export default function Login() {
   const [isSignup, setIsSignup] = useState(false);
   const [email, setEmail]       = useState("");
   const [password, setPassword] = useState("");
@@ -74,9 +75,9 @@ export default function Login({ setPage }) {
         </div>
 
         <div style={{ display: "flex", gap: "1rem", fontSize: "12px", color: "#444" }}>
-          <span style={{ cursor: "pointer", transition: "color 0.2s" }} onMouseOver={(e) => e.target.style.color = "#888"} onMouseOut={(e) => e.target.style.color = "#444"} onClick={() => setPage("privacy")}>Privacy Policy</span>
+          <Link to="/privacy" style={{ color: "#444", textDecoration: "none", transition: "color 0.2s" }} onMouseOver={(e) => e.target.style.color = "#888"} onMouseOut={(e) => e.target.style.color = "#444"}>Privacy Policy</Link>
           <span>•</span>
-          <span style={{ cursor: "pointer", transition: "color 0.2s" }} onMouseOver={(e) => e.target.style.color = "#888"} onMouseOut={(e) => e.target.style.color = "#444"} onClick={() => setPage("terms")}>Terms of Service</span>
+          <Link to="/terms" style={{ color: "#444", textDecoration: "none", transition: "color 0.2s" }} onMouseOver={(e) => e.target.style.color = "#888"} onMouseOut={(e) => e.target.style.color = "#444"}>Terms of Service</Link>
         </div>
       </div>
     </div>
