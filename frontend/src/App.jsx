@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { initializeApp } from "firebase/app";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 import Login from "./pages/Login";
@@ -22,20 +23,23 @@ const firebaseConfig = {
 const firebaseApp = initializeApp(firebaseConfig);
 export const auth = getAuth(firebaseApp);
 
+function ProtectedLayout({ user, children }) {
+  if (!user) return <Navigate to="/login" replace />;
+  return (
+    <div style={{ display:"flex", minHeight:"100vh", fontFamily:"'DM Sans', sans-serif", background:"#0f0f0f", color:"#f0f0f0" }}>
+      <Sidebar user={user} />
+      <main style={{ flex:1, padding:"2rem", overflowY:"auto" }}>
+        {children}
+      </main>
+    </div>
+  );
+}
+
 export default function App() {
   const [user, setUser]       = useState(null);
   const [loading, setLoading] = useState(true);
-  const [page, setPage]       = useState(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get("page") || "dashboard";
-  });
 
   useEffect(() => {
-    // Clear URL query params after picking them up to keep the URL clean
-    if (window.location.search.includes("page=")) {
-      window.history.replaceState({}, document.title, "/");
-    }
-
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setLoading(false);
@@ -49,21 +53,34 @@ export default function App() {
     </div>
   );
 
-  const isPublicPage = page === "privacy" || page === "terms";
-
-  if (!user && !isPublicPage) return <Login setPage={setPage} />;
-
   return (
-    <div style={{ display:"flex", minHeight:"100vh", fontFamily:"'DM Sans', sans-serif", background:"#0f0f0f", color:"#f0f0f0" }}>
-      {user && <Sidebar page={page} setPage={setPage} user={user} />}
-      <main style={{ flex:1, padding: isPublicPage ? "0" : "2rem", overflowY:"auto" }}>
-        {page === "dashboard"    && <Dashboard user={user} />}
-        {page === "new-campaign" && <NewCampaign user={user} setPage={setPage} />}
-        {page === "settings"     && <Settings user={user} />}
-        {page === "privacy"      && <PrivacyPolicy onBack={() => setPage(user ? "dashboard" : "login")} />}
-        {page === "terms"        && <TermsOfService onBack={() => setPage(user ? "dashboard" : "login")} />}
-        {(page === "login" && !user) && <Login setPage={setPage} />}
-      </main>
-    </div>
+    <BrowserRouter>
+      <Routes>
+        {/* Public routes */}
+        <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
+        <Route path="/privacy" element={<PrivacyPolicy />} />
+        <Route path="/terms" element={<TermsOfService />} />
+
+        {/* Protected routes */}
+        <Route path="/" element={
+          <ProtectedLayout user={user}>
+            <Dashboard user={user} />
+          </ProtectedLayout>
+        } />
+        <Route path="/new-campaign" element={
+          <ProtectedLayout user={user}>
+            <NewCampaign user={user} />
+          </ProtectedLayout>
+        } />
+        <Route path="/settings" element={
+          <ProtectedLayout user={user}>
+            <Settings user={user} />
+          </ProtectedLayout>
+        } />
+
+        {/* Catch-all */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
