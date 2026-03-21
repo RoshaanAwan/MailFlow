@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from "react";
-import { Link } from "react-router-dom";
 import { auth } from "../App";
 
 const API = import.meta.env.VITE_API_URL || "/api";
@@ -28,7 +27,7 @@ const s = {
   hint:    { fontSize:11, color:"#444", marginTop:6 },
 };
 
-export default function NewCampaign({ user }) {
+export default function NewCampaign({ user, setPage }) {
   const [form, setForm] = useState({
     campaign_name: "",
     subject:       "quick idea for {company}",
@@ -159,7 +158,7 @@ export default function NewCampaign({ user }) {
 
       {!gmailConnected && (
         <div style={s.warn}>
-          ⚠️ <strong>Gmail not connected.</strong> Head to <Link to="/settings" style={{ color:"#fbbf24", textDecoration:"underline" }}>Settings</Link> to authorize your account before starting a campaign.
+          ⚠️ <strong>Gmail not connected.</strong> Head to <span style={{ cursor:"pointer", textDecoration:"underline" }} onClick={()=>setPage("settings")}>Settings</span> to authorize your account before starting a campaign.
         </div>
       )}
 

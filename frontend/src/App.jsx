@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { initializeApp } from "firebase/app";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 import Login from "./pages/Login";
@@ -23,21 +23,11 @@ const firebaseConfig = {
 const firebaseApp = initializeApp(firebaseConfig);
 export const auth = getAuth(firebaseApp);
 
-function ProtectedLayout({ user, children }) {
-  if (!user) return <Navigate to="/login" replace />;
-  return (
-    <div style={{ display:"flex", minHeight:"100vh", fontFamily:"'DM Sans', sans-serif", background:"#0f0f0f", color:"#f0f0f0" }}>
-      <Sidebar user={user} />
-      <main style={{ flex:1, padding:"2rem", overflowY:"auto" }}>
-        {children}
-      </main>
-    </div>
-  );
-}
-
-export default function App() {
+/* ── Main app shell (page-state navigation) ── */
+function AppShell() {
   const [user, setUser]       = useState(null);
   const [loading, setLoading] = useState(true);
+  const [page, setPage]       = useState("dashboard");
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
@@ -53,33 +43,28 @@ export default function App() {
     </div>
   );
 
+  if (!user) return <Login />;
+
+  return (
+    <div style={{ display:"flex", minHeight:"100vh", fontFamily:"'DM Sans', sans-serif", background:"#0f0f0f", color:"#f0f0f0" }}>
+      <Sidebar page={page} setPage={setPage} user={user} />
+      <main style={{ flex:1, padding:"2rem", overflowY:"auto" }}>
+        {page === "dashboard"    && <Dashboard user={user} />}
+        {page === "new-campaign" && <NewCampaign user={user} setPage={setPage} />}
+        {page === "settings"     && <Settings user={user} />}
+      </main>
+    </div>
+  );
+}
+
+/* ── Router: only /privacy and /terms get real URL routes ── */
+export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* Public routes */}
-        <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
         <Route path="/privacy" element={<PrivacyPolicy />} />
         <Route path="/terms" element={<TermsOfService />} />
-
-        {/* Protected routes */}
-        <Route path="/" element={
-          <ProtectedLayout user={user}>
-            <Dashboard user={user} />
-          </ProtectedLayout>
-        } />
-        <Route path="/new-campaign" element={
-          <ProtectedLayout user={user}>
-            <NewCampaign user={user} />
-          </ProtectedLayout>
-        } />
-        <Route path="/settings" element={
-          <ProtectedLayout user={user}>
-            <Settings user={user} />
-          </ProtectedLayout>
-        } />
-
-        {/* Catch-all */}
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<AppShell />} />
       </Routes>
     </BrowserRouter>
   );
