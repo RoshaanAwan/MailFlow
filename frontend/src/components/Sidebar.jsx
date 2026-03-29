@@ -49,12 +49,6 @@ export default function Sidebar({ page, setPage, user }) {
       </nav>
 
       <footer className="sidebar-footer">
-        <div className="footer-links">
-          <Link to="/privacy" className="footer-link">Privacy</Link>
-          <span className="footer-link">•</span>
-          <Link to="/terms" className="footer-link">Terms</Link>
-        </div>
-
         <div className="user-profile">
           <div className="user-avatar">{userInitial}</div>
           <div className="user-info">
