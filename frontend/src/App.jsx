@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { BrowserRouter, Routes, Route, useNavigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useNavigate, useLocation, Navigate } from "react-router-dom";
 import { initializeApp } from "firebase/app";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 import Landing from "./pages/Landing";
@@ -33,23 +33,11 @@ function AppShell() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
+    return onAuthStateChanged(auth, (u) => {
       setUser(u);
       setLoading(false);
     });
-    return unsub;
   }, []);
-
-  // 1. Enforce Authentication Redirects
-  useEffect(() => {
-    if (!loading) {
-      if (!user && location.pathname !== "/login") {
-        navigate("/login", { replace: true });
-      } else if (user && location.pathname === "/login") {
-        navigate("/dashboard", { replace: true });
-      }
-    }
-  }, [user, loading, location.pathname, navigate]);
 
   if (loading) return (
     <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100vh", fontFamily:"'DM Sans', sans-serif", color:"#888" }}>
@@ -57,14 +45,19 @@ function AppShell() {
     </div>
   );
 
-  if (!user) return <Login />;
+  // Enforce Authentication Redirects Declaratively
+  if (!user && location.pathname !== "/login") return <Navigate to="/login" replace />;
+  if (user && location.pathname === "/login") return <Navigate to="/dashboard" replace />;
+  
+  // Render Login page standalone if unauthenticated
+  if (!user && location.pathname === "/login") return <Login />;
 
-  // 2. Derive Current Screen purely from URL
+  // Derive Current Screen for Sidebar active state
   let page = "dashboard";
   if (location.pathname === "/campaign") page = "new-campaign";
   if (location.pathname === "/settings") page = "settings";
 
-  // 3. Shim setPage so Sidebar buttons perform real browser navigation
+  // Shim setPage so Sidebar buttons perform real browser navigation
   const handleNavigation = (targetPage) => {
     if (targetPage === "dashboard") navigate("/dashboard");
     if (targetPage === "new-campaign") navigate("/campaign");
@@ -75,9 +68,12 @@ function AppShell() {
     <div style={{ display:"flex", minHeight:"100vh", fontFamily:"'DM Sans', sans-serif", background:"#0f0f0f", color:"#f0f0f0" }}>
       <Sidebar page={page} setPage={handleNavigation} user={user} />
       <main style={{ flex:1, padding:"2rem", overflowY:"auto" }}>
-        {page === "dashboard"    && <Dashboard user={user} />}
-        {page === "new-campaign" && <NewCampaign user={user} setPage={handleNavigation} />}
-        {page === "settings"     && <Settings user={user} />}
+        <Routes>
+          <Route path="/dashboard" element={<Dashboard user={user} />} />
+          <Route path="/campaign" element={<NewCampaign user={user} setPage={handleNavigation} />} />
+          <Route path="/settings" element={<Settings user={user} />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
       </main>
     </div>
   );
