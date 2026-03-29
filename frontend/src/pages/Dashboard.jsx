@@ -1,29 +1,56 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { auth } from "../App";
+import "./Dashboard.css";
 
 const API = import.meta.env.VITE_API_URL || "/api";
 
-const s = {
-  title:    { fontSize:24, fontWeight:700, color:"#f0f0f0", marginBottom:6, letterSpacing:"-0.5px" },
-  sub:      { fontSize:14, color:"#555", marginBottom:32 },
-  grid:     { display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(160px, 1fr))", gap:12, marginBottom:32 },
-  statCard: { background:"#1a1a1a", border:"0.5px solid #1f1f1f", borderRadius:12, padding:"1.25rem" },
-  statNum:  { fontSize:28, fontWeight:700, color:"#f0f0f0", margin:"0 0 4px" },
-  statLbl:  { fontSize:12, color:"#555", margin:0, fontWeight:500 },
-  section:  { marginBottom:24 },
-  secTitle: { fontSize:14, fontWeight:600, color:"#888", marginBottom:12, textTransform:"uppercase", letterSpacing:"0.05em" },
-  table:    { width:"100%", borderCollapse:"collapse" },
-  th:       { fontSize:12, color:"#555", fontWeight:500, textAlign:"left", padding:"8px 12px", borderBottom:"0.5px solid #1f1f1f" },
-  td:       { fontSize:13, color:"#ccc", padding:"10px 12px", borderBottom:"0.5px solid #141414" },
-  badge:    { display:"inline-block", padding:"2px 8px", borderRadius:4, fontSize:11, fontWeight:500 },
-  empty:    { fontSize:14, color:"#444", textAlign:"center", padding:"3rem 0" },
+/* --- Professional SVG Icons --- */
+const Icons = {
+  Campaigns: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 22h14a2 2 0 0 0 2-2V7.5L14.5 2H6a2 2 0 0 0-2 2v4"/><polyline points="14 2 14 8 20 8"/><path d="M2 15h10"/><path d="m9 18 3-3-3-3"/></svg>
+  ),
+  Sent: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+  ),
+  Failed: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+  ),
+  Active: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+  ),
+  Empty: () => (
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+  )
 };
 
-const statusColor = (s) => ({
-  "completed": { background:"#0d2b1a", color:"#4ade80" },
-  "running":   { background:"#1a2010", color:"#86efac" },
-  "error":     { background:"#2b0d0d", color:"#f87171" },
-}[s] || { background:"#1f1f1f", color:"#888" });
+const StatCard = ({ icon, value, label, type, i }) => (
+  <div className="stat-card" data-type={type} style={{ animationDelay: `${i * 0.05}s` }}>
+    <div className="stat-header">
+      <div className="icon-wrapper">
+        {icon}
+      </div>
+      <div className="stat-label">{label}</div>
+    </div>
+    <div className="stat-content">
+      <div className="stat-value">{value}</div>
+    </div>
+  </div>
+);
+
+const StatusBadge = ({ status }) => {
+  const config = {
+    running:   { label: "Running Now", class: "tag-running" },
+    completed: { label: "Completed",   class: "tag-completed" },
+    error:     { label: "Check Errors", class: "tag-error" }
+  };
+  const { label, class: cls } = config[status] || { label: status, class: "" };
+  return (
+    <span className={`status-tag ${cls}`}>
+      <span className="dot" />
+      {label}
+    </span>
+  );
+};
 
 export default function Dashboard({ user }) {
   const [campaigns, setCampaigns] = useState({});
@@ -49,64 +76,108 @@ export default function Dashboard({ user }) {
     return () => clearInterval(interval);
   }, []);
 
-  const list   = Object.entries(campaigns);
-  const total  = list.reduce((a, [,v]) => a + (v.total || 0), 0);
-  const sent   = list.reduce((a, [,v]) => a + (v.sent  || 0), 0);
-  const failed = list.reduce((a, [,v]) => a + (v.failed|| 0), 0);
-  const active = list.filter(([,v]) => v.status === "running").length;
+  const list = useMemo(() => Object.entries(campaigns), [campaigns]);
+  
+  const stats = useMemo(() => {
+    return {
+      total:  list.length,
+      sent:   list.reduce((a, [, v]) => a + (v.sent   || 0), 0),
+      failed: list.reduce((a, [, v]) => a + (v.failed || 0), 0),
+      active: list.filter(([, v]) => v.status === "running").length
+    };
+  }, [list]);
 
   return (
-    <div>
-      <div style={s.title}>Dashboard</div>
-      <div style={s.sub}>Overview of all your email campaigns</div>
+    <div className="dashboard-container">
+      <header className="dashboard-header">
+        <div className="dashboard-title-group">
+          <h1 className="dashboard-title">System Overview</h1>
+          <p className="dashboard-subtitle">Monitoring your automated email workflows</p>
+        </div>
+      </header>
 
-      <div style={s.grid}>
-        {[
-          { num: list.length, lbl: "Total campaigns" },
-          { num: sent,        lbl: "Emails sent" },
-          { num: failed,      lbl: "Failed" },
-          { num: active,      lbl: "Running now" },
-        ].map((c, i) => (
-          <div key={i} style={s.statCard}>
-            <p style={s.statNum}>{c.num}</p>
-            <p style={s.statLbl}>{c.lbl}</p>
-          </div>
-        ))}
+      <div className="stats-grid">
+        <StatCard 
+          type="total"
+          icon={<Icons.Campaigns />} 
+          value={stats.total} 
+          label="Total Campaigns" 
+          i={0} 
+        />
+        <StatCard 
+          type="sent"
+          icon={<Icons.Sent />} 
+          value={stats.sent.toLocaleString()} 
+          label="Emails Delivered" 
+          i={1} 
+        />
+        <StatCard 
+          type="failed"
+          icon={<Icons.Failed />} 
+          value={stats.failed.toLocaleString()} 
+          label="Failed Delivery" 
+          i={2} 
+        />
+        <StatCard 
+          type="active"
+          icon={<Icons.Active />} 
+          value={stats.active} 
+          label="Active Tasks" 
+          i={3} 
+        />
       </div>
 
-      <div style={s.section}>
-        <div style={s.secTitle}>Recent campaigns</div>
+      <div className="section-container">
+        <div className="section-header">
+          <h2 className="section-title">Campaign Performance</h2>
+        </div>
+        
         {loading ? (
-          <div style={s.empty}>Loading...</div>
+          <div className="empty-placeholder">
+            <div className="loader"></div>
+            <p className="empty-text">Retrieving real-time data...</p>
+          </div>
         ) : list.length === 0 ? (
-          <div style={s.empty}>No campaigns yet — start one!</div>
+          <div className="empty-placeholder">
+            <Icons.Empty />
+            <p className="empty-text">No campaign data found in your account.</p>
+          </div>
         ) : (
-          <table style={s.table}>
-            <thead>
-              <tr>
-                {["Campaign ID", "Status", "Sent", "Failed", "Total"].map(h => (
-                  <th key={h} style={s.th}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {list.map(([id, c]) => (
-                <tr key={id}>
-                  <td style={s.td}>{id.split("_").slice(1).join("_")}</td>
-                  <td style={s.td}>
-                    <span style={{ ...s.badge, ...statusColor(c.status) }}>
-                      {c.status}
-                    </span>
-                  </td>
-                  <td style={s.td}>{c.sent   || 0}</td>
-                  <td style={s.td}>{c.failed || 0}</td>
-                  <td style={s.td}>{c.total  || 0}</td>
+          <div className="table-wrapper">
+            <table className="campaigns-table">
+              <thead>
+                <tr>
+                  <th>Job Identifer</th>
+                  <th>Execution Status</th>
+                  <th>Delivered</th>
+                  <th>Failed</th>
+                  <th>Total Packets</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {list.slice().reverse().map(([id, c]) => (
+                  <tr key={id} className="campaign-row">
+                    <td>
+                      <div className="campaign-name-cell">
+                        <span className="campaign-indicator" />
+                        <code>#{id.split("_").slice(1).join("_") || id}</code>
+                      </div>
+                    </td>
+                    <td>
+                      <StatusBadge status={c.status} />
+                    </td>
+                    <td>{c.sent   || 0}</td>
+                    <td>{c.failed || 0}</td>
+                    <td>{c.total  || 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
   );
 }
+
+

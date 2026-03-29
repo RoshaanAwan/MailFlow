@@ -1,36 +1,32 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { auth } from "../App";
+import "./NewCampaign.css";
 
 const API = import.meta.env.VITE_API_URL || "/api";
 
-const s = {
-  title:   { fontSize:24, fontWeight:700, color:"#f0f0f0", marginBottom:6, letterSpacing:"-0.5px" },
-  sub:     { fontSize:14, color:"#555", marginBottom:32 },
-  card:    { background:"#1a1a1a", border:"0.5px solid #1f1f1f", borderRadius:12, padding:"1.5rem", marginBottom:16 },
-  secLbl:  { fontSize:11, color:"#555", fontWeight:600, textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:16 },
-  grid:    { display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 },
-  label:   { fontSize:12, color:"#888", marginBottom:6, display:"block" },
-  input:   { width:"100%", background:"#111", border:"0.5px solid #222", borderRadius:8, padding:"10px 12px", color:"#f0f0f0", fontSize:14, boxSizing:"border-box", outline:"none" },
-  textarea:{ width:"100%", background:"#111", border:"0.5px solid #222", borderRadius:8, padding:"10px 12px", color:"#f0f0f0", fontSize:13, boxSizing:"border-box", outline:"none", minHeight:160, resize:"vertical", fontFamily:"monospace", lineHeight:1.6 },
-  upload:  { width:"100%", background:"#111", border:"0.5px dashed #333", borderRadius:8, padding:"1.5rem", textAlign:"center", cursor:"pointer", color:"#555", fontSize:13, boxSizing:"border-box" },
-  btn:     { padding:"11px 24px", background:"#f0f0f0", color:"#0f0f0f", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", marginTop:8 },
-  cbtn:    { padding:"11px 24px", background:"transparent", color:"#f87171", border:"0.5px solid #f87171", borderRadius:8, fontSize:14, fontWeight:500, cursor:"pointer", marginTop:8, marginLeft:12 },
-  progress:{ background:"#111", border:"0.5px solid #222", borderRadius:12, padding:"1.5rem", marginTop:16 },
-  bar:     { height:6, background:"#222", borderRadius:3, overflow:"hidden", margin:"12px 0" },
-  fill:    { height:"100%", background:"#f0f0f0", borderRadius:3, transition:"width 0.5s" },
-  stat:    { display:"flex", gap:24, marginTop:8 },
-  statItem:{ fontSize:13, color:"#888" },
-  statNum: { fontWeight:600, color:"#f0f0f0" },
-  err:     { fontSize:13, color:"#f87171", marginTop:8 },
-  warn:    { fontSize:13, color:"#fbbf24", background:"rgba(251,191,36,0.1)", border:"0.5px solid #fbbf24", padding:"12px", borderRadius:8, marginBottom:16 },
-  success: { fontSize:13, color:"#4ade80", marginTop:8 },
-  hint:    { fontSize:11, color:"#444", marginTop:6 },
+/* --- Professional SVG Icons --- */
+const Icons = {
+  Details: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+  ),
+  Sender: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+  ),
+  Template: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+  ),
+  Upload: () => (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="upload-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+  ),
+  Warn: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+  )
 };
 
 export default function NewCampaign({ user, setPage }) {
   const [form, setForm] = useState({
     campaign_name: "",
-    subject:       "quick idea for {company}",
+    subject:       "Quick idea for {company}",
     body:          `Hi {name},\n\nI build web apps and APIs for startups — recently helped a similar company cut their dev costs by 40% while shipping faster.\n\nHad a quick idea for {company} that might be worth 10 minutes of your time.\n\nWorth a chat?\n\nRoshaan Ali\nFull Stack Engineer\n+92 302 4917779\n\n---\nTo unsubscribe, reply with "unsubscribe".`,
     sender_name:   "",
     sender_email:  "",
@@ -38,7 +34,8 @@ export default function NewCampaign({ user, setPage }) {
     daily_limit:   20,
     sheet_name:    "Email Campaign Log",
   });
-  const [file, setFile]           = useState(null);
+  
+  const [file, setFile]             = useState(null);
   const [campaignId, setCampaignId] = useState(null);
   const [status, setStatus]       = useState(null);
   const [error, setError]         = useState("");
@@ -70,10 +67,10 @@ export default function NewCampaign({ user, setPage }) {
   };
 
   const startCampaign = async () => {
-    if (!gmailConnected)    return setError("Please connect your Gmail account in Settings first.");
-    if (!file)              return setError("Please upload a contacts CSV file.");
-    if (!form.campaign_name) return setError("Please enter a campaign name.");
-    if (!form.sender_email) return setError("Please enter your sender email.");
+    if (!gmailConnected)    return setError("Authorization required. Please connect Gmail in settings.");
+    if (!file)              return setError("Required: Contacts dataset (CSV).");
+    if (!form.campaign_name) return setError("Required: Unique campaign identifier.");
+    if (!form.sender_email) return setError("Required: Verified sender email address.");
 
     setLoading(true); setError("");
 
@@ -81,8 +78,6 @@ export default function NewCampaign({ user, setPage }) {
       const token   = await auth.currentUser.getIdToken();
       const formData = new FormData();
       formData.append("file", file);
-      
-      // Send all campaign config as form fields to avoid URL length limits and proxy retries
       formData.append("campaign_name", form.campaign_name);
       formData.append("subject",       form.subject);
       formData.append("body",          form.body);
@@ -99,7 +94,7 @@ export default function NewCampaign({ user, setPage }) {
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Failed to start campaign");
+      if (!res.ok) throw new Error(data.detail || "Workflow execution failed.");
 
       setCampaignId(data.campaign_id);
       pollStatus(data.campaign_id, token);
@@ -113,7 +108,6 @@ export default function NewCampaign({ user, setPage }) {
   const pollInterval = useRef(null);
 
   const pollStatus = (id, token) => {
-    // Clear any existing poll just in case
     if (pollInterval.current) clearInterval(pollInterval.current);
 
     pollInterval.current = setInterval(async () => {
@@ -149,102 +143,189 @@ export default function NewCampaign({ user, setPage }) {
     });
   };
 
-  const pct = status ? Math.round((status.sent / Math.max(status.total, 1)) * 100) : 0;
+  const pct = useMemo(() => {
+    if (!status) return 0;
+    return Math.round((status.sent / Math.max(status.total, 1)) * 100);
+  }, [status]);
 
   return (
-    <div>
-      <div style={s.title}>New campaign</div>
-      <div style={s.sub}>Upload your contacts and send personalized emails via Gmail API</div>
+    <div className="campaign-container">
+      <header className="campaign-header">
+        <h1 className="campaign-title">New Campaign</h1>
+        <p className="campaign-subtitle">Build and deploy a personalized email automation workflow.</p>
+      </header>
 
       {!gmailConnected && (
-        <div style={s.warn}>
-          ⚠️ <strong>Gmail not connected.</strong> Head to <span style={{ cursor:"pointer", textDecoration:"underline" }} onClick={()=>setPage("settings")}>Settings</span> to authorize your account before starting a campaign.
+        <div className="warn-alert">
+          <Icons.Warn />
+          <div>
+            <strong>Gmail authorization required.</strong> 
+            <span style={{ marginLeft: 8, cursor:"pointer", textDecoration:"underline" }} onClick={()=>setPage("settings")}>
+              Configure service connection →
+            </span>
+          </div>
         </div>
       )}
 
-      <div style={s.card}>
-        <div style={s.secLbl}>Campaign details</div>
-        <div style={{ marginBottom:12 }}>
-          <label style={s.label}>Campaign name</label>
-          <input style={s.input} value={form.campaign_name} onChange={e=>update("campaign_name", e.target.value)} placeholder="e.g. Startup outreach March 2026" />
+      {/* --- Step 1: Configuration --- */}
+      <section className="form-section">
+        <div className="section-head">
+          <span className="section-icon"><Icons.Details /></span>
+          <span className="section-label">Campaign Identity</span>
         </div>
-        <div style={s.grid}>
-          <div>
-            <label style={s.label}>Daily send limit</label>
-            <input style={s.input} type="number" value={form.daily_limit} onChange={e=>update("daily_limit", e.target.value)} />
+        <div className="form-grid">
+          <div className="form-group form-group-full">
+            <label className="field-label">Identifier / Name</label>
+            <input 
+              className="input-field" 
+              value={form.campaign_name} 
+              onChange={e=>update("campaign_name", e.target.value)} 
+              placeholder="e.g. Q1_Startup_Outreach_2026" 
+            />
           </div>
-          <div>
-            <label style={s.label}>Delay between emails (seconds)</label>
-            <input style={s.input} type="number" value={form.delay_seconds} onChange={e=>update("delay_seconds", e.target.value)} />
+          <div className="form-group">
+            <label className="field-label">Daily Send Limit</label>
+            <input 
+              className="input-field" 
+              type="number" 
+              value={form.daily_limit} 
+              onChange={e=>update("daily_limit", e.target.value)} 
+            />
+          </div>
+          <div className="form-group">
+            <label className="field-label">Interval (Seconds)</label>
+            <input 
+              className="input-field" 
+              type="number" 
+              value={form.delay_seconds} 
+              onChange={e=>update("delay_seconds", e.target.value)} 
+            />
           </div>
         </div>
-      </div>
+      </section>
 
-      <div style={s.card}>
-        <div style={s.secLbl}>Sender configuration</div>
-        <div style={s.grid}>
-          <div>
-            <label style={s.label}>Sender name</label>
-            <input style={s.input} value={form.sender_name} onChange={e=>update("sender_name", e.target.value)} placeholder="Roshaan Ali" />
+      {/* --- Step 2: Sender --- */}
+      <section className="form-section">
+        <div className="section-head">
+          <span className="section-icon"><Icons.Sender /></span>
+          <span className="section-label">Sender Verification</span>
+        </div>
+        <div className="form-grid">
+          <div className="form-group">
+            <label className="field-label">Friendly Name</label>
+            <input 
+              className="input-field" 
+              value={form.sender_name} 
+              onChange={e=>update("sender_name", e.target.value)} 
+              placeholder="Roshaan Ali" 
+            />
           </div>
-          <div>
-            <label style={s.label}>Sender email</label>
-            <input style={s.input} value={form.sender_email} onChange={e=>update("sender_email", e.target.value)} placeholder="you@gmail.com" />
+          <div className="form-group">
+            <label className="field-label">Sender Address</label>
+            <input 
+              className="input-field" 
+              value={form.sender_email} 
+              onChange={e=>update("sender_email", e.target.value)} 
+              placeholder="verified@domain.com" 
+            />
           </div>
         </div>
-        <div style={s.hint}>Ensure this email matches your connected Gmail account.</div>
-      </div>
+        <p className="field-hint">Address must be authorized via the connected Gmail security token.</p>
+      </section>
 
-      <div style={s.card}>
-        <div style={s.secLbl}>Email template</div>
-        <div style={{ marginBottom:12 }}>
-          <label style={s.label}>Subject line</label>
-          <input style={s.input} value={form.subject} onChange={e=>update("subject", e.target.value)} />
-          <div style={s.hint}>Use {"{name}"} and {"{company}"} for personalization</div>
+      {/* --- Step 3: Template --- */}
+      <section className="form-section">
+        <div className="section-head">
+          <span className="section-icon"><Icons.Template /></span>
+          <span className="section-label">Payload Template</span>
         </div>
-        <div>
-          <label style={s.label}>Email body</label>
-          <textarea style={s.textarea} value={form.body} onChange={e=>update("body", e.target.value)} />
+        <div className="form-group" style={{ marginBottom: "1.5rem" }}>
+          <label className="field-label">Subject Vector</label>
+          <input 
+            className="input-field" 
+            value={form.subject} 
+            onChange={e=>update("subject", e.target.value)} 
+          />
         </div>
-      </div>
+        <div className="form-group">
+          <label className="field-label">Email Payload (Markdown / Plain)</label>
+          <textarea 
+            className="input-field textarea-field" 
+            value={form.body} 
+            onChange={e=>update("body", e.target.value)} 
+          />
+          <p className="field-hint">Dynamic markers: {"{name}"}, {"{company}"}, {"{industry}"}</p>
+        </div>
+      </section>
 
-      <div style={s.card}>
-        <div style={s.secLbl}>Contacts CSV</div>
-        <label style={s.upload}>
+      {/* --- Step 4: Audience --- */}
+      <section className="form-section">
+        <div className="section-head">
+          <span className="section-icon"><Icons.Details /></span>
+          <span className="section-label">Dataset Ingestion</span>
+        </div>
+        <label className="upload-area">
           <input type="file" accept=".csv" onChange={handleFile} style={{ display:"none" }} />
-          {file ? `✓ ${file.name} selected` : "Click to upload contacts.csv"}
+          <Icons.Upload />
+          <span className="upload-text">
+            {file ? `✓ ${file.name}` : "Drop contacts.csv or click to browser"}
+          </span>
+          <p className="field-hint">Headers required: name, email, company</p>
         </label>
-        <div style={s.hint}>CSV must have columns: name, email, company</div>
+      </section>
+
+      {error && <div className="error-alert">Error: {error}</div>}
+
+      <div className="action-bar">
+        <button 
+          className="btn-primary" 
+          onClick={startCampaign} 
+          disabled={loading || !gmailConnected}
+        >
+          {loading ? "Deploying..." : "Launch Campaign"}
+          {!loading && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polyline points="22 2 15 22 11 13 2 9 22 2"/></svg>}
+        </button>
+        {campaignId && status?.status === "running" && (
+          <button className="btn-outline-error" onClick={cancelCampaign}>Terminate</button>
+        )}
       </div>
-
-      {error && <div style={s.err}>{error}</div>}
-
-      <button style={s.btn} onClick={startCampaign} disabled={loading || !gmailConnected}>
-        {loading ? "Starting..." : "Start campaign →"}
-      </button>
-      {campaignId && status?.status === "running" && (
-        <button style={s.cbtn} onClick={cancelCampaign}>Cancel</button>
-      )}
 
       {status && (
-        <div style={s.progress}>
-          <div style={{ fontSize:14, fontWeight:600, color:"#f0f0f0", marginBottom:4 }}>
-            {status.status === "completed" ? "Campaign complete!" : status.status === "running" ? "Sending..." : status.status}
-          </div>
-          <div style={s.bar}><div style={{ ...s.fill, width:`${pct}%` }} /></div>
-          <div style={s.stat}>
-            <div style={s.statItem}>Sent <span style={s.statNum}>{status.sent}</span></div>
-            <div style={s.statItem}>Failed <span style={s.statNum}>{status.failed}</span></div>
-            <div style={s.statItem}>Total <span style={s.statNum}>{status.total}</span></div>
-            <div style={s.statItem}>Progress <span style={s.statNum}>{pct}%</span></div>
-          </div>
-          {status.status === "completed" && (
-            <div style={{ ...s.success, marginTop:12 }}>
-              All done! Check your Google Sheet for the full log.
+        <div className="execution-progress">
+          <div className="progress-header">
+            <div className="progress-status">
+              {status.status === "completed" ? "All tasks successfully completed" : 
+               status.status === "running" ? "Transmitting payloads..." : 
+               `Status: ${status.status}`}
             </div>
-          )}
+            <div className="p-stat-val">{pct}%</div>
+          </div>
+          <div className="progress-track">
+            <div className="progress-fill" style={{ width: `${pct}%` }} />
+          </div>
+          <div className="prog-stats">
+            <div className="p-stat-item">
+              <span className="p-stat-lbl">Sent</span>
+              <span className="p-stat-val">{status.sent}</span>
+            </div>
+            <div className="p-stat-item">
+              <span className="p-stat-lbl">Fail</span>
+              <span className="p-stat-val" style={{ color: status.failed > 0 ? "var(--accent-error)" : "inherit" }}>
+                {status.failed}
+              </span>
+            </div>
+            <div className="p-stat-item">
+              <span className="p-stat-lbl">Total</span>
+              <span className="p-stat-val">{status.total}</span>
+            </div>
+            <div className="p-stat-item">
+              <span className="p-stat-lbl">Avg Delay</span>
+              <span className="p-stat-val">{form.delay_seconds}s</span>
+            </div>
+          </div>
         </div>
       )}
     </div>
   );
 }
+
