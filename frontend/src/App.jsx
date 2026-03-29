@@ -44,6 +44,12 @@ function AppShell() {
     </div>
   );
 
+  useEffect(() => {
+    if (user && window.location.pathname === "/login") {
+      window.history.replaceState(null, "", "/dashboard");
+    }
+  }, [user]);
+
   if (!user) return <Login />;
 
   return (
