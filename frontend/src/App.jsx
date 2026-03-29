@@ -65,9 +65,9 @@ function AppShell() {
   };
 
   return (
-    <div style={{ display:"flex", minHeight:"100vh", fontFamily:"'DM Sans', sans-serif", background:"#0f0f0f", color:"#f0f0f0" }}>
+    <div className="app-container" style={{ fontFamily:"'DM Sans', sans-serif", background:"#0f0f0f", color:"#f0f0f0" }}>
       <Sidebar page={page} setPage={handleNavigation} user={user} />
-      <main style={{ flex:1, padding:"2rem", overflowY:"auto" }}>
+      <main className="app-main">
         <Routes>
           <Route path="/dashboard" element={<Dashboard user={user} />} />
           <Route path="/campaign" element={<NewCampaign user={user} setPage={handleNavigation} />} />
