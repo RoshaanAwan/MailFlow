@@ -45,7 +45,7 @@ export default function Landing() {
         <div className="landing-nav-links">
           <a href="#features">Platform</a>
           <a href="#about">Features</a>
-          <Link to="/login" className="nav-login-btn">
+          <Link to={user ? "/dashboard" : "/login"} className="nav-login-btn">
             {user ? "Dashboard" : "Login"}
           </Link>
         </div>
@@ -106,7 +106,7 @@ export default function Landing() {
                <div className="status-indicator">
                  <div className="pulse-dot"></div> Live Routing
                </div>
-               <div className="progress-bar"><div className="progress-fill"></div></div>
+               <div className="abs-progress-bar"><div className="abs-progress-fill"></div></div>
              </div>
           </div>
         </div>
