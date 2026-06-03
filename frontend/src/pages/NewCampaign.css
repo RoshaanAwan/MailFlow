@@ -194,6 +194,32 @@
   margin-top: 0.25rem;
 }
 
+.field-hint code {
+  font-family: ui-monospace, monospace;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0.05rem 0.35rem;
+  border-radius: 4px;
+  color: var(--text-secondary);
+}
+
+.sample-csv-link {
+  margin-top: 0.5rem;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--accent-primary);
+  border-radius: 8px;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.sample-csv-link:hover {
+  border-color: var(--accent-primary);
+  background: rgba(99, 102, 241, 0.08);
+}
+
 .action-bar {
   display: flex;
   gap: 1rem;
