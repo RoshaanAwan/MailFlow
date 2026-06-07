@@ -1,0 +1,13 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+mailflow.db
+_test.db
+.env
+test_*.py
+conftest.py
+firebase_service_account.json
+storage_data.json
+*.json.local

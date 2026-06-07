@@ -11,6 +11,7 @@ legacy campaign flow continues to use the JSON store in main.py.
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
@@ -20,25 +21,51 @@ from config import DATABASE_URL
 BACKEND_DIR = Path(__file__).resolve().parent
 _SQLITE_FALLBACK = f"sqlite+aiosqlite:///{BACKEND_DIR / 'mailflow.db'}"
 
+# libpq/psql query params that asyncpg does NOT accept as keyword args. Providers
+# like Neon/Supabase append these to their connection strings; we strip them and
+# translate SSL intent into asyncpg's connect_args instead.
+_LIBPQ_ONLY_PARAMS = {"sslmode", "channel_binding", "gssencmode", "target_session_attrs"}
 
-def _normalize_async_url(url: str) -> str:
-    """Coerce a connection string to an async driver SQLAlchemy can use."""
+
+def _normalize_async_url(url: str) -> tuple[str, dict]:
+    """Coerce a connection string to an async driver SQLAlchemy can use.
+
+    Returns (url, connect_args). For Postgres we move libpq-only params (e.g.
+    `sslmode=require`, which asyncpg rejects) out of the URL and request SSL via
+    connect_args when the original URL asked for it.
+    """
     if not url:
-        return _SQLITE_FALLBACK
-    # Many providers (and SQLAlchemy docs) hand out "postgres://" or
-    # "postgresql://"; the async engine needs the asyncpg driver.
+        return _SQLITE_FALLBACK, {}
+
+    if url.startswith("sqlite"):
+        if "+aiosqlite" not in url:
+            url = url.replace("sqlite://", "sqlite+aiosqlite://", 1)
+        return url, {}
+
+    # Normalize the scheme to the asyncpg driver.
     if url.startswith("postgres://"):
-        return url.replace("postgres://", "postgresql+asyncpg://", 1)
-    if url.startswith("postgresql://"):
-        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
-    if url.startswith("sqlite://") and "+aiosqlite" not in url:
-        return url.replace("sqlite://", "sqlite+aiosqlite://", 1)
-    return url
+        url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+    # Split off the query string, drop libpq-only params, and decide on SSL.
+    parts = urlsplit(url)
+    kept, want_ssl = [], False
+    for key, val in parse_qsl(parts.query, keep_blank_values=True):
+        if key.lower() in _LIBPQ_ONLY_PARAMS:
+            if key.lower() == "sslmode" and val.lower() in ("require", "verify-ca", "verify-full", "prefer", "allow"):
+                want_ssl = True
+            continue
+        kept.append((key, val))
+
+    cleaned = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(kept), parts.fragment))
+    connect_args = {"ssl": True} if want_ssl else {}
+    return cleaned, connect_args
 
 
-ASYNC_DATABASE_URL = _normalize_async_url(DATABASE_URL)
+ASYNC_DATABASE_URL, _CONNECT_ARGS = _normalize_async_url(DATABASE_URL)
 
-engine = create_async_engine(ASYNC_DATABASE_URL, pool_pre_ping=True)
+engine = create_async_engine(ASYNC_DATABASE_URL, pool_pre_ping=True, connect_args=_CONNECT_ARGS)
 SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
