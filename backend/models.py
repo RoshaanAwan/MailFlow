@@ -41,6 +41,22 @@ class SmtpCredential(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class Domain(Base):
+    """A customer's sending domain, verified via Resend (SPF/DKIM DNS records)."""
+
+    __tablename__ = "domains"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), index=True, nullable=False)  # e.g. "example.com"
+    resend_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    # not_started | pending | verified | failed | temporary_failure
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="not_started")
+    # JSON-encoded list of DNS records the customer must add.
+    records_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class AuthToken(Base):
     """Single-use, time-limited tokens for email verification & password reset.
 

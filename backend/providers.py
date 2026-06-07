@@ -1,17 +1,23 @@
 """
 Email delivery providers.
 
-A thin abstraction so the actual sending backend is swappable. Today the only
-implementation is GmailProvider, which sends through the user's OAuth-connected
-Gmail account (reused by both the legacy campaign flow and the new email API).
+A thin abstraction so the actual sending backend is swappable. Implementations:
+  - SharedSmtpProvider: sends every user's mail through MailFlow's own shared SMTP
+    account (From forced to the shared address, user's address set as Reply-To).
+  - ResendProvider: sends via the Resend HTTP API from a verified domain.
+  - UserSmtpProvider: sends through a customer's OWN SMTP credentials (BYO-SMTP);
+    From is the customer's own address, no Reply-To rewrite.
 To add Amazon SES, Brevo, etc. later, implement EmailProvider.send and select
 the provider where it's constructed — no API/route changes needed.
 """
 
 from __future__ import annotations
 
+import json
 import smtplib
 import ssl
+import urllib.error
+import urllib.request
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional, Protocol
@@ -133,3 +139,174 @@ class SharedSmtpProvider:
         except Exception as e:
             raise ProviderError(f"Send failed: {e}") from e
         return msg.get("Message-ID", "")
+
+
+class UserSmtpProvider:
+    """Sends through a customer's OWN SMTP credentials (BYO-SMTP).
+
+    Unlike SharedSmtpProvider, there's no shared account: the From address is the
+    customer's own address and there's no Reply-To rewrite or "via MailFlow" tag —
+    the mail goes out as if sent directly from their server. Build via
+    from_credential() from a stored SmtpCredential row (password decrypted).
+    """
+
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        username: str,
+        password: str,
+        from_email: str,
+        from_name: str = "",
+    ):
+        if not (host and username and password):
+            raise ProviderError("SMTP settings are incomplete (host, username and password are required)")
+        self.host = host
+        self.port = int(port)
+        self.username = username
+        self.password = password
+        self.from_email = from_email or username
+        self.from_name = from_name
+
+    @classmethod
+    def from_credential(cls, cred) -> "UserSmtpProvider":
+        # Imported lazily to avoid an import cycle (mirrors from_config above).
+        from crypto import decrypt
+
+        try:
+            password = decrypt(cred.password_encrypted)
+        except Exception as e:
+            raise ProviderError(f"Could not read stored SMTP password: {e}") from e
+        return cls(
+            host=cred.host,
+            port=cred.port,
+            username=cred.username,
+            password=password,
+            from_email=cred.username,  # login doubles as the From address
+            from_name=cred.from_name or "",
+        )
+
+    def _connect(self) -> smtplib.SMTP:
+        context = ssl.create_default_context()
+        server = smtplib.SMTP(self.host, self.port, timeout=20)
+        server.starttls(context=context)
+        server.login(self.username, self.password)
+        return server
+
+    def verify_connection(self) -> None:
+        """Connect + authenticate without sending. Raises ProviderError on failure."""
+        try:
+            server = self._connect()
+            server.quit()
+        except ProviderError:
+            raise
+        except Exception as e:
+            raise ProviderError(f"SMTP connection failed: {e}") from e
+
+    def send(
+        self,
+        *,
+        from_name: str,
+        from_email: str,          # the sender address (customer's own; any address allowed)
+        to_email: str,
+        subject: str,
+        text: Optional[str] = None,
+        html: Optional[str] = None,
+    ) -> str:
+        sender = from_email or self.from_email
+        msg = build_mime(
+            from_name=from_name or self.from_name,
+            from_email=sender,
+            to_email=to_email,
+            subject=subject,
+            text=text,
+            html=html,
+        )
+        try:
+            server = self._connect()
+            try:
+                server.sendmail(sender, [to_email], msg.as_string())
+            finally:
+                server.quit()
+        except ProviderError:
+            raise
+        except Exception as e:
+            raise ProviderError(f"Send failed: {e}") from e
+        return msg.get("Message-ID", "")
+
+
+class ResendProvider:
+    """Sends via the Resend HTTP API (https://resend.com).
+
+    The envelope From is RESEND_FROM (an address on a domain you've verified in
+    Resend). The user's chosen name is shown in the display name and their own
+    address is set as Reply-To, so replies reach them — same UX as the shared
+    SMTP sender, but with proper domain-based deliverability.
+    """
+
+    API_URL = "https://api.resend.com/emails"
+
+    def __init__(self, api_key: str, from_email: str, from_name: str = "MailFlow"):
+        if not api_key:
+            raise ProviderError("Resend is not configured (RESEND_API_KEY missing)")
+        self.api_key = api_key
+        self.from_email = from_email
+        self.from_name = from_name
+
+    @classmethod
+    def from_config(cls) -> "ResendProvider":
+        from config import RESEND_API_KEY, RESEND_FROM, RESEND_FROM_NAME
+        return cls(api_key=RESEND_API_KEY, from_email=RESEND_FROM, from_name=RESEND_FROM_NAME)
+
+    def send(
+        self,
+        *,
+        from_name: str,
+        from_email: str,          # the sender address (must be on a verified domain)
+        to_email: str,
+        subject: str,
+        text: Optional[str] = None,
+        html: Optional[str] = None,
+    ) -> str:
+        # If a from_email is supplied (per-domain sending), send AS that address.
+        # Otherwise fall back to the configured shared address.
+        if from_email:
+            sender = f"{from_name} <{from_email}>" if from_name else from_email
+        else:
+            display_name = f"{from_name} via {self.from_name}" if from_name else self.from_name
+            sender = f"{display_name} <{self.from_email}>"
+        payload = {
+            "from": sender,
+            "to": [to_email],
+            "subject": subject,
+        }
+        if html:
+            payload["html"] = html
+        if text:
+            payload["text"] = text
+        if not html and not text:
+            payload["text"] = ""
+
+        data = json.dumps(payload).encode("utf-8")
+        request = urllib.request.Request(
+            self.API_URL,
+            data=data,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "MailFlow/1.0",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=20) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+            return body.get("id", "")
+        except urllib.error.HTTPError as e:
+            try:
+                detail = json.loads(e.read().decode("utf-8")).get("message", str(e))
+            except Exception:
+                detail = str(e)
+            raise ProviderError(f"Resend rejected the email: {detail}") from e
+        except Exception as e:
+            raise ProviderError(f"Resend send failed: {e}") from e

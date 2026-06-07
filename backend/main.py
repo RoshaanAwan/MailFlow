@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, BackgroundTasks, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List
 import pandas as pd
 import time
@@ -21,16 +21,22 @@ import uuid
 from datetime import datetime, timezone
 
 from config import (
+    CORS_ORIGINS,
     FRONTEND_URL,
     GLOBAL_DAILY_LIMIT,
     PER_USER_DAILY_LIMIT,
     get_config_status,
     log_startup_config,
+    resend_configured,
+    sender_configured,
     smtp_configured,
 )
-from providers import SharedSmtpProvider, ProviderError
+from providers import SharedSmtpProvider, ResendProvider, ProviderError, UserSmtpProvider
 from db import get_session, init_db
-from models import ApiKey, EmailLog, User
+from models import ApiKey, EmailLog, User, Domain, SmtpCredential
+import crypto
+import json
+import resend_domains
 from api_keys import generate_api_key, get_api_key_user
 from auth import (
     consume_auth_token,
@@ -57,11 +63,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="MailFlow API", version="1.0.0", lifespan=lifespan)
 
-# Allow React frontend to connect
+# Allow the React frontend to connect. In production set CORS_ORIGINS (or rely on
+# FRONTEND_URL) to your deployed frontend domain(s); the wildcard is a dev-only
+# fallback. Note: the browser forbids "*" together with credentials, so we only
+# enable allow_credentials when explicit origins are configured.
+_explicit_origins = CORS_ORIGINS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_explicit_origins or ["*"],
+    allow_credentials=bool(_explicit_origins),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -83,11 +93,17 @@ campaigns = {}    # { campaign_id: status_dict }
 
 # get_current_user is provided by auth.py (self-hosted JWT), returning {"uid","email"}.
 
-def get_shared_provider() -> Optional[SharedSmtpProvider]:
-    """The single shared sender all users send through, or None if not configured."""
-    if not smtp_configured():
-        return None
-    return SharedSmtpProvider.from_config()
+def get_shared_provider():
+    """The delivery backend all users send through, or None if not configured.
+
+    Prefers Resend (domain-based deliverability) when RESEND_API_KEY is set,
+    otherwise falls back to the shared SMTP/Gmail account.
+    """
+    if resend_configured():
+        return ResendProvider.from_config()
+    if smtp_configured():
+        return SharedSmtpProvider.from_config()
+    return None
 
 
 async def _sent_today(session: AsyncSession, uid: Optional[str] = None) -> int:
@@ -149,10 +165,40 @@ class ResetPasswordRequest(BaseModel):
 class ApiKeyCreateRequest(BaseModel):
     name: str = "API Key"
 
+class DomainCreateRequest(BaseModel):
+    name: str
+
+class SmtpCredentialRequest(BaseModel):
+    host: str = "smtp.gmail.com"
+    port: int = 587
+    username: EmailStr          # login + From address
+    password: str               # plaintext app password; encrypted before store; never returned
+    from_name: Optional[str] = ""
+
+class SmtpCredentialResponse(BaseModel):
+    configured: bool
+    host: Optional[str] = None
+    port: Optional[int] = None
+    username: Optional[str] = None
+    from_name: Optional[str] = None
+    # never include the password
+
+class SmtpTestRequest(BaseModel):
+    # Like SmtpCredentialRequest but the password is optional: when blank, the
+    # test falls back to the user's already-saved password.
+    host: str = "smtp.gmail.com"
+    port: int = 587
+    username: EmailStr
+    password: Optional[str] = ""
+    from_name: Optional[str] = ""
+
 class MailSendRequest(BaseModel):
+    # Accept both "from" (SendGrid-style) and "from_email" for the sender address.
+    model_config = {"populate_by_name": True}
+
     to: EmailStr
     subject: str
-    from_email: Optional[EmailStr] = None
+    from_email: Optional[EmailStr] = Field(default=None, alias="from")
     from_name: Optional[str] = ""
     text: Optional[str] = None
     html: Optional[str] = None
@@ -224,7 +270,7 @@ async def get_quota(user=Depends(get_current_user), session: AsyncSession = Depe
         "used": used,
         "limit": PER_USER_DAILY_LIMIT,
         "remaining": max(0, PER_USER_DAILY_LIMIT - used),
-        "sender_ready": smtp_configured(),
+        "sender_ready": sender_configured(),
     }
 
 # ============================================================
@@ -452,6 +498,123 @@ def list_campaigns(user=Depends(get_current_user)):
     return user_campaigns
 
 # ============================================================
+#  SENDING DOMAINS (per-customer, verified via Resend)
+# ============================================================
+
+def _serialize_domain(d: Domain) -> dict:
+    try:
+        records = json.loads(d.records_json)
+    except Exception:
+        records = []
+    return {
+        "id": d.id,
+        "name": d.name,
+        "status": d.status,
+        "records": records,
+        "verified": d.status == "verified",
+        "created_at": d.created_at.isoformat() if d.created_at else None,
+    }
+
+def _normalize_domain_name(raw: str) -> str:
+    name = (raw or "").strip().lower()
+    # Strip scheme/path and any leading @ or www. so users can paste loosely.
+    for prefix in ("https://", "http://"):
+        if name.startswith(prefix):
+            name = name[len(prefix):]
+    name = name.split("/")[0].lstrip("@")
+    if name.startswith("www."):
+        name = name[4:]
+    return name
+
+@app.post("/v1/domains")
+async def add_domain(
+    req: DomainCreateRequest,
+    user=Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    name = _normalize_domain_name(req.name)
+    if not name or "." not in name:
+        raise HTTPException(status_code=422, detail="Enter a valid domain, e.g. example.com")
+
+    existing = (
+        await session.execute(
+            select(Domain).where(Domain.user_id == int(user["uid"]), Domain.name == name)
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="You've already added this domain.")
+
+    try:
+        created = resend_domains.create_domain(name)
+    except resend_domains.ResendError as e:
+        raise HTTPException(status_code=400, detail=f"Could not create domain: {e}")
+
+    domain = Domain(
+        user_id=int(user["uid"]),
+        name=name,
+        resend_id=created.get("id", ""),
+        status=created.get("status", "not_started"),
+        records_json=json.dumps(created.get("records", [])),
+    )
+    session.add(domain)
+    await session.commit()
+    await session.refresh(domain)
+    return _serialize_domain(domain)
+
+@app.get("/v1/domains")
+async def list_domains(user=Depends(get_current_user), session: AsyncSession = Depends(get_session)):
+    result = await session.execute(
+        select(Domain).where(Domain.user_id == int(user["uid"])).order_by(desc(Domain.created_at))
+    )
+    return [_serialize_domain(d) for d in result.scalars().all()]
+
+async def _get_owned_domain(session: AsyncSession, uid: str, domain_id: int) -> Domain:
+    domain = (
+        await session.execute(
+            select(Domain).where(Domain.id == domain_id, Domain.user_id == int(uid))
+        )
+    ).scalar_one_or_none()
+    if domain is None:
+        raise HTTPException(status_code=404, detail="Domain not found")
+    return domain
+
+@app.post("/v1/domains/{domain_id}/verify")
+async def verify_domain(
+    domain_id: int,
+    user=Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    domain = await _get_owned_domain(session, user["uid"], domain_id)
+    try:
+        # Trigger a re-check, then fetch the latest status + records.
+        resend_domains.verify_domain(domain.resend_id)
+        latest = resend_domains.get_domain(domain.resend_id)
+    except resend_domains.ResendError as e:
+        raise HTTPException(status_code=400, detail=f"Verification check failed: {e}")
+
+    domain.status = latest.get("status", domain.status)
+    if latest.get("records") is not None:
+        domain.records_json = json.dumps(latest["records"])
+    await session.commit()
+    await session.refresh(domain)
+    return _serialize_domain(domain)
+
+@app.delete("/v1/domains/{domain_id}")
+async def remove_domain(
+    domain_id: int,
+    user=Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    domain = await _get_owned_domain(session, user["uid"], domain_id)
+    try:
+        resend_domains.delete_domain(domain.resend_id)
+    except resend_domains.ResendError:
+        pass  # Remove locally even if the remote delete fails.
+    await session.delete(domain)
+    await session.commit()
+    return {"message": "Domain removed"}
+
+# ============================================================
 #  API KEY MANAGEMENT (dashboard / Firebase auth)
 # ============================================================
 
@@ -511,6 +674,109 @@ async def revoke_key(
     return {"message": "API key revoked"}
 
 # ============================================================
+#  CUSTOMER SMTP CREDENTIALS (BYO-SMTP, dashboard / JWT auth)
+# ============================================================
+
+def _serialize_smtp(cred: SmtpCredential | None) -> dict:
+    """SmtpCredentialResponse shape — never includes the password."""
+    if cred is None:
+        return {"configured": False}
+    return {
+        "configured": True,
+        "host": cred.host,
+        "port": cred.port,
+        "username": cred.username,
+        "from_name": cred.from_name,
+    }
+
+async def _get_user_smtp(session: AsyncSession, uid) -> SmtpCredential | None:
+    result = await session.execute(
+        select(SmtpCredential).where(SmtpCredential.user_id == int(uid))
+    )
+    return result.scalar_one_or_none()
+
+@app.get("/v1/smtp")
+async def get_smtp(
+    user=Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    cred = await _get_user_smtp(session, user["uid"])
+    return _serialize_smtp(cred)
+
+@app.post("/v1/smtp")
+async def save_smtp(
+    req: SmtpCredentialRequest,
+    user=Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    host = (req.host or "").strip()
+    if not host:
+        raise HTTPException(status_code=422, detail="SMTP host is required.")
+    if not (1 <= req.port <= 65535):
+        raise HTTPException(status_code=422, detail="SMTP port must be between 1 and 65535.")
+    if not (req.password or "").strip():
+        raise HTTPException(status_code=422, detail="SMTP password is required.")
+
+    cred = await _get_user_smtp(session, user["uid"])
+    if cred is None:
+        cred = SmtpCredential(user_id=int(user["uid"]))
+        session.add(cred)
+    cred.host = host
+    cred.port = req.port
+    cred.username = str(req.username)
+    cred.password_encrypted = crypto.encrypt(req.password)
+    cred.from_name = (req.from_name or "").strip()[:120]
+    await session.commit()
+    await session.refresh(cred)
+    return _serialize_smtp(cred)
+
+@app.delete("/v1/smtp")
+async def delete_smtp(
+    user=Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    cred = await _get_user_smtp(session, user["uid"])
+    if cred is not None:
+        await session.delete(cred)
+        await session.commit()
+    return {"message": "SMTP credentials removed"}
+
+@app.post("/v1/smtp/test")
+async def test_smtp(
+    req: SmtpTestRequest,
+    user=Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Connect + authenticate with the supplied credentials without sending.
+
+    If the password is left blank, fall back to the user's saved password so an
+    already-configured account can be re-tested without re-typing it.
+    """
+    password = (req.password or "").strip()
+    if not password:
+        saved = await _get_user_smtp(session, user["uid"])
+        if saved is None:
+            return {"ok": False, "error": "No saved SMTP credentials — enter a password to test."}
+        try:
+            password = crypto.decrypt(saved.password_encrypted)
+        except Exception as e:
+            return {"ok": False, "error": f"Could not read saved password: {e}"}
+
+    try:
+        provider = UserSmtpProvider(
+            host=(req.host or "").strip(),
+            port=req.port,
+            username=str(req.username),
+            password=password,
+            from_email=str(req.username),
+            from_name=req.from_name or "",
+        )
+        provider.verify_connection()
+    except ProviderError as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True}
+
+# ============================================================
 #  EMAIL ACTIVITY LOG (dashboard / Firebase auth)
 # ============================================================
 
@@ -552,7 +818,7 @@ async def send_mail(
     session: AsyncSession = Depends(get_session),
 ):
     """SendGrid-style endpoint. Authenticate with an API key and send one email
-    through MailFlow's shared sender (the user's address is set as Reply-To)."""
+    from one of the key owner's verified sending domains (SendGrid-style)."""
     uid = api_key.uid
 
     # Soft email-verification gate: the key owner must have a verified email.
@@ -566,27 +832,67 @@ async def send_mail(
                    "Check your inbox or resend the verification email from the dashboard.",
         )
 
-    provider = get_shared_provider()
-    if provider is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Sending is temporarily unavailable (mailer not configured).",
-        )
-
     if not req.text and not req.html:
         raise HTTPException(status_code=422, detail="Provide at least one of 'text' or 'html'.")
 
-    # Enforce per-user + global daily quota.
-    await check_send_quota(session, uid)
+    # Prefer the owner's own SMTP if they've configured it (BYO-SMTP).
+    cred = (
+        await session.execute(
+            select(SmtpCredential).where(SmtpCredential.user_id == int(uid))
+        )
+    ).scalar_one_or_none()
 
-    # The user's own address becomes Reply-To; default it to the account email.
-    from_email = req.from_email or owner.email
+    if cred is not None:
+        # BYO-SMTP: send via the customer's own server. They own their domain and
+        # deliverability, so there's no verified-domain gate, no MailFlow quota, and
+        # any 'from' address is allowed (defaults to the SMTP login address).
+        try:
+            provider = UserSmtpProvider.from_credential(cred)
+        except ProviderError as e:
+            raise HTTPException(status_code=400, detail=f"Your SMTP settings are invalid: {e}")
+        from_email = str(req.from_email) if req.from_email else cred.username
+    else:
+        provider = get_shared_provider()
+        if provider is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Sending is temporarily unavailable (mailer not configured).",
+            )
+
+        # Strict domain policy: 'from' is required and its domain must be one of the
+        # user's VERIFIED sending domains.
+        if not req.from_email:
+            raise HTTPException(
+                status_code=422,
+                detail="'from' is required and must use one of your verified domains.",
+            )
+        from_email = str(req.from_email)
+        from_domain = from_email.rsplit("@", 1)[-1].lower()
+
+        verified = (
+            await session.execute(
+                select(Domain).where(
+                    Domain.user_id == int(uid),
+                    Domain.name == from_domain,
+                    Domain.status == "verified",
+                )
+            )
+        ).scalar_one_or_none()
+        if verified is None:
+            raise HTTPException(
+                status_code=403,
+                detail=f"The domain '{from_domain}' is not a verified sending domain on your "
+                       f"account. Add and verify it in the dashboard (Domains) before sending from it.",
+            )
+
+        # Enforce per-user + global daily quota (protects the shared sending account).
+        await check_send_quota(session, uid)
 
     log = EmailLog(
         uid=uid,
         api_key_id=api_key.id,
         to_email=str(req.to),
-        from_email=str(from_email),
+        from_email=from_email,
         subject=req.subject,
         status="failed",
     )
@@ -594,7 +900,7 @@ async def send_mail(
     try:
         message_id = provider.send(
             from_name=req.from_name or "",
-            from_email=str(from_email),
+            from_email=from_email,
             to_email=str(req.to),
             subject=req.subject,
             text=req.text,
