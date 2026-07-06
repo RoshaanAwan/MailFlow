@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { auth } from "../App";
-import { onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged } from "../auth";
 import "./Landing.css";
 
 const Icons = {
@@ -21,7 +20,7 @@ export default function Landing() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
+    const unsub = onAuthStateChanged((u) => {
       setUser(u);
     });
     return unsub;
