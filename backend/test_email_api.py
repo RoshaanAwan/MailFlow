@@ -35,16 +35,24 @@ class FakeProvider:
 
 
 async def _seed_verified_user():
-    """Create a real, email-verified user; return its uid string."""
+    """Create a real, email-verified user with a connected Google account; return uid."""
     from db import SessionLocal
-    from models import User
+    from models import User, GoogleAccount
     from auth import hash_password
+    import crypto
 
     async with SessionLocal() as s:
         u = User(email=SEED_EMAIL, password_hash=hash_password("x"), email_verified=True)
         s.add(u)
         await s.commit()
         await s.refresh(u)
+        s.add(GoogleAccount(
+            user_id=u.id,
+            google_email=SEED_EMAIL,
+            refresh_token_encrypted=crypto.encrypt("fake-refresh-token"),
+            from_name="",
+        ))
+        await s.commit()
         return str(u.id)
 
 
@@ -56,8 +64,10 @@ def client():
 
     # Override auth -> the seeded verified user (bypasses JWT verification).
     main.app.dependency_overrides[main.get_current_user] = lambda: fake_user
-    # Override the shared sender -> fake (no real SMTP connection).
-    main.get_shared_provider = lambda: FakeProvider()
+    # Override the per-user Gmail provider -> fake (no real Gmail API call).
+    async def _fake_gmail(session, uid):
+        return FakeProvider()
+    main.get_user_gmail_provider = _fake_gmail
 
     with TestClient(main.app) as c:
         yield c

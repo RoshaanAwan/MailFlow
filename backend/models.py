@@ -22,23 +22,21 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class SmtpCredential(Base):
-    """A user's own SMTP sending credentials (e.g. Gmail + App Password).
+class GoogleAccount(Base):
+    """A user's connected Google account, used to send mail via the Gmail API.
 
-    Replaces the old Google OAuth connection. The password is stored encrypted
-    (see crypto.py); never store or return it in plaintext.
+    We store the OAuth refresh token (encrypted at rest, see crypto.py) and mint
+    short-lived access tokens on demand. One connected account per user.
     """
 
-    __tablename__ = "smtp_credentials"
+    __tablename__ = "google_accounts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, index=True, nullable=False)
-    host: Mapped[str] = mapped_column(String(255), nullable=False, default="smtp.gmail.com")
-    port: Mapped[int] = mapped_column(Integer, nullable=False, default=587)
-    username: Mapped[str] = mapped_column(String(320), nullable=False)  # the email/login
-    password_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    google_email: Mapped[str] = mapped_column(String(320), nullable=False)  # the connected Gmail address
+    refresh_token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
     from_name: Mapped[str] = mapped_column(String(120), nullable=False, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class AuthToken(Base):

@@ -25,6 +25,35 @@ _load_dotenv()
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
+# Browser origins allowed to call this API (CORS). Comma-separated list of your
+# deployed frontend URL(s); FRONTEND_URL is always included. Empty -> permissive
+# "*" fallback (dev only); see main.py.
+def _parse_origins() -> list[str]:
+    raw = os.getenv("CORS_ORIGINS", "")
+    origins = [o.strip().rstrip("/") for o in raw.split(",") if o.strip()]
+    fe = FRONTEND_URL.strip().rstrip("/")
+    if fe and (origins or fe != "http://localhost:3000") and fe not in origins:
+        origins.append(fe)
+    return origins
+
+
+CORS_ORIGINS = _parse_origins()
+
+# Google OAuth — lets each user connect their own Gmail account so MailFlow sends
+# email through it (via the Gmail API). Create an OAuth client (Web application)
+# in Google Cloud Console, add GOOGLE_REDIRECT_URI to its authorized redirect
+# URIs, and enable the Gmail API. See docs/GOOGLE_CONNECT_SETUP.md.
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+# Where Google redirects back after consent. Must EXACTLY match a redirect URI on
+# the OAuth client. Defaults to this backend's /v1/google/callback.
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/v1/google/callback")
+
+
+def google_oauth_configured() -> bool:
+    return bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
+
+
 # Database. Defaults to a local SQLite file so the app runs with zero setup.
 # In production set DATABASE_URL to a Postgres connection string, e.g. from Neon:
 #   postgresql://user:pass@host/dbname
@@ -75,6 +104,7 @@ def get_config_status() -> dict[str, Any]:
         "jwt_secret_is_default": JWT_SECRET == "dev-only-insecure-change-me",
         "encryption_key_explicit": bool(ENCRYPTION_KEY),
         "system_mailer_configured": smtp_configured(),
+        "google_oauth_configured": google_oauth_configured(),
     }
 
 

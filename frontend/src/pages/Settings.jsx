@@ -19,6 +19,9 @@ const Icons = {
 
 export default function Settings({ user }) {
   const [quota, setQuota] = useState(null);
+  const [google, setGoogle] = useState(null);     // { connected, email, oauth_configured }
+  const [googleMsg, setGoogleMsg] = useState("");
+  const [connecting, setConnecting] = useState(false);
 
   const [newPass, setNewPass]             = useState("");
   const [currentPass, setCurrentPass]     = useState("");
@@ -26,7 +29,18 @@ export default function Settings({ user }) {
 
   const authHeader = async () => ({ Authorization: `Bearer ${await auth.currentUser.getIdToken()}` });
 
-  useEffect(() => { fetchQuota(); }, []);
+  useEffect(() => {
+    fetchQuota();
+    fetchGoogle();
+    // Show the result of the OAuth round-trip (callback redirects with ?google=...).
+    const params = new URLSearchParams(window.location.search);
+    const g = params.get("google");
+    if (g === "connected") setGoogleMsg("Google account connected successfully.");
+    else if (g === "no_refresh") setGoogleMsg("Failed: Google didn't return access — try again, or remove MailFlow at myaccount.google.com/permissions and reconnect.");
+    else if (g === "expired") setGoogleMsg("Failed: the connection request expired. Please try again.");
+    else if (g) setGoogleMsg("Failed: could not connect your Google account.");
+    if (g) window.history.replaceState({}, "", window.location.pathname);
+  }, []);
 
   const fetchQuota = async () => {
     try {
@@ -35,6 +49,44 @@ export default function Settings({ user }) {
       if (res.ok) setQuota(data);
     } catch (e) {
       console.error("Quota fetch failed", e);
+    }
+  };
+
+  const fetchGoogle = async () => {
+    try {
+      const res  = await fetch(`${API}/v1/google/status`, { headers: await authHeader() });
+      const data = await res.json();
+      if (res.ok) setGoogle(data);
+    } catch (e) {
+      console.error("Google status fetch failed", e);
+    }
+  };
+
+  const connectGoogle = async () => {
+    setGoogleMsg(""); setConnecting(true);
+    try {
+      const res  = await fetch(`${API}/v1/google/connect`, { headers: await authHeader() });
+      const data = await res.json();
+      if (res.ok && data.url) {
+        window.location.href = data.url;   // send the browser to Google's consent screen
+      } else {
+        setGoogleMsg("Failed: " + (data.detail || "Could not start Google connect."));
+        setConnecting(false);
+      }
+    } catch (e) {
+      setGoogleMsg("Failed: " + e.message);
+      setConnecting(false);
+    }
+  };
+
+  const disconnectGoogle = async () => {
+    if (!window.confirm("Disconnect your Google account? You won't be able to send until you reconnect.")) return;
+    setGoogleMsg("");
+    try {
+      const res = await fetch(`${API}/v1/google`, { method: "DELETE", headers: await authHeader() });
+      if (res.ok) { setGoogle({ connected: false, oauth_configured: google?.oauth_configured }); setGoogleMsg("Google account disconnected."); }
+    } catch (e) {
+      setGoogleMsg("Failed: " + e.message);
     }
   };
 
@@ -81,29 +133,42 @@ export default function Settings({ user }) {
         </div>
       </section>
 
-      {/* --- Sending (shared, nothing to connect) --- */}
+      {/* --- Connect Google (send through your own Gmail) --- */}
       <section className="settings-card">
         <div className="card-head">
           <span className="card-icon"><Icons.Mail /></span>
-          <span className="card-label">Sending</span>
+          <span className="card-label">Sending — Google Account</span>
         </div>
         <p className="settings-subtitle" style={{ fontSize: "0.875rem", marginBottom: "1rem" }}>
-          Sending is built in — no setup required. Emails go out through MailFlow's
-          delivery service, and replies come straight back to <strong>{user.email}</strong>.
+          Connect your Google account so MailFlow sends email <strong>through your own Gmail</strong>.
+          Emails go out from your address, and campaigns + the API use this connection.
         </p>
-        {quota && (
-          <div className="info-row">
-            <span className="info-key">Daily quota</span>
-            <span className="info-val">
-              {quota.used} / {quota.limit} used · {quota.remaining} left today
-            </span>
-          </div>
+
+        {google && google.connected ? (
+          <>
+            <div className="info-row">
+              <span className="info-key">Connected account</span>
+              <span className="info-val">{google.email || "Google account"}</span>
+            </div>
+            {quota && (
+              <div className="info-row">
+                <span className="info-key">Daily quota</span>
+                <span className="info-val">{quota.used} / {quota.limit} used · {quota.remaining} left today</span>
+              </div>
+            )}
+            <button className="btn-primary" style={{ marginTop: "1rem", background: "transparent", border: "1px solid #5a2a2a", color: "#e07a7a" }} onClick={disconnectGoogle}>
+              Disconnect
+            </button>
+          </>
+        ) : google && !google.oauth_configured ? (
+          <div className="msg-err">⚠ Google connect isn't configured on the server yet (admin setup needed).</div>
+        ) : (
+          <button className="btn-primary" onClick={connectGoogle} disabled={connecting}>
+            {connecting ? "Redirecting…" : "Connect Google Account"}
+          </button>
         )}
-        {quota && !quota.sender_ready && (
-          <div className="msg-err" style={{ marginTop: "0.75rem" }}>
-            ⚠ The delivery service is not configured yet (admin setup needed).
-          </div>
-        )}
+
+        {googleMsg && <div className={googleMsg.includes("success") || googleMsg.includes("connected") || googleMsg.includes("disconnected") ? "msg-ok" : "msg-err"} style={{ marginTop: "0.75rem" }}>{googleMsg}</div>}
       </section>
 
       {/* --- Security --- */}

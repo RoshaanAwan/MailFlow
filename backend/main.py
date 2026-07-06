@@ -12,25 +12,37 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, BackgroundTasks, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 import pandas as pd
 import time
 import io
 import uuid
-from datetime import datetime, timezone
+import json
+import secrets
+import urllib.parse
+import urllib.request
+import urllib.error
+from datetime import datetime, timezone, timedelta
 
 from config import (
+    CORS_ORIGINS,
     FRONTEND_URL,
     GLOBAL_DAILY_LIMIT,
+    GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET,
+    GOOGLE_REDIRECT_URI,
     PER_USER_DAILY_LIMIT,
     get_config_status,
+    google_oauth_configured,
     log_startup_config,
     smtp_configured,
 )
-from providers import SharedSmtpProvider, ProviderError
+from providers import SharedSmtpProvider, GmailApiProvider, ProviderError
 from db import get_session, init_db
-from models import ApiKey, EmailLog, User
+from models import ApiKey, EmailLog, User, GoogleAccount
+import crypto
 from api_keys import generate_api_key, get_api_key_user
 from auth import (
     consume_auth_token,
@@ -57,11 +69,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="MailFlow API", version="1.0.0", lifespan=lifespan)
 
-# Allow React frontend to connect
+# Allow the React frontend to connect. In production set CORS_ORIGINS (or rely on
+# FRONTEND_URL); the wildcard is a dev-only fallback. Browsers forbid "*" with
+# credentials, so credentials are only enabled when explicit origins are set.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=CORS_ORIGINS or ["*"],
+    allow_credentials=bool(CORS_ORIGINS),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -88,6 +102,21 @@ def get_shared_provider() -> Optional[SharedSmtpProvider]:
     if not smtp_configured():
         return None
     return SharedSmtpProvider.from_config()
+
+
+async def get_user_gmail_provider(session: AsyncSession, uid) -> Optional[GmailApiProvider]:
+    """Build a GmailApiProvider from the user's connected Google account, or None."""
+    account = (
+        await session.execute(select(GoogleAccount).where(GoogleAccount.user_id == int(uid)))
+    ).scalar_one_or_none()
+    if account is None:
+        return None
+    refresh_token = crypto.decrypt(account.refresh_token_encrypted)
+    return GmailApiProvider.from_refresh_token(
+        refresh_token=refresh_token,
+        sender_email=account.google_email,
+        from_name=account.from_name,
+    )
 
 
 async def _sent_today(session: AsyncSession, uid: Optional[str] = None) -> int:
@@ -168,13 +197,16 @@ def _safe_format(template: str, name: str, company: str) -> str:
             return "{" + key + "}"
     return template.format_map(_Default(name=name, company=company))
 
-def send_campaign_task(campaign_id: str, contacts: list, config: CampaignRequest, sender_email: str):
+def send_campaign_task(campaign_id: str, contacts: list, config: CampaignRequest,
+                       gmail_refresh_token: str, gmail_sender_email: str):
     campaigns[campaign_id] = {"status": "running", "sent": 0, "failed": 0, "total": len(contacts)}
 
     try:
-        provider = get_shared_provider()
-        if provider is None:
-            raise ProviderError("System mailer not configured")
+        provider = GmailApiProvider.from_refresh_token(
+            refresh_token=gmail_refresh_token,
+            sender_email=gmail_sender_email,
+            from_name=config.sender_name,
+        )
     except ProviderError as e:
         campaigns[campaign_id]["status"] = f"error: {e}"
         return
@@ -387,8 +419,17 @@ async def start_campaign(
     session: AsyncSession = Depends(get_session),
 ):
     uid = user["uid"]
-    if get_shared_provider() is None:
-        raise HTTPException(status_code=503, detail="Sending is temporarily unavailable (mailer not configured).")
+    # Campaigns send through the user's own connected Gmail account.
+    account = (
+        await session.execute(select(GoogleAccount).where(GoogleAccount.user_id == int(uid)))
+    ).scalar_one_or_none()
+    if account is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Connect your Google account first (Settings → Connect Google) to run a campaign.",
+        )
+    gmail_refresh_token = crypto.decrypt(account.refresh_token_encrypted)
+    gmail_sender_email = account.google_email
 
     campaign = CampaignRequest(
         campaign_name=campaign_name,
@@ -421,7 +462,8 @@ async def start_campaign(
     # Use UUID suffix to prevent IDs from colliding within the same second
     campaign_id = f"{uid}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:6]}"
     background_tasks.add_task(
-        send_campaign_task, campaign_id, contacts, campaign, sender_email,
+        send_campaign_task, campaign_id, contacts, campaign,
+        gmail_refresh_token, gmail_sender_email,
     )
 
     return {
@@ -511,6 +553,159 @@ async def revoke_key(
     return {"message": "API key revoked"}
 
 # ============================================================
+#  GOOGLE ACCOUNT CONNECT (OAuth -> send via user's Gmail)
+# ============================================================
+
+GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
+GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+OAUTH_STATE_TTL_MIN = 15
+
+
+def _make_oauth_state(uid: str) -> str:
+    """Short-lived signed token carrying the uid through the OAuth round-trip.
+
+    The callback is a plain browser redirect (no Authorization header), so we
+    encode who started the flow into `state`, signed as a JWT.
+    """
+    from jose import jwt
+    from config import JWT_SECRET, JWT_ALGORITHM
+    payload = {
+        "uid": uid,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=OAUTH_STATE_TTL_MIN),
+        "nonce": secrets.token_urlsafe(8),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def _read_oauth_state(state: str) -> Optional[str]:
+    from jose import jwt, JWTError
+    from config import JWT_SECRET, JWT_ALGORITHM
+    try:
+        payload = jwt.decode(state, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return payload.get("uid")
+    except JWTError:
+        return None
+
+
+@app.get("/v1/google/status")
+async def google_status(
+    user=Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    account = (
+        await session.execute(select(GoogleAccount).where(GoogleAccount.user_id == int(user["uid"])))
+    ).scalar_one_or_none()
+    if account is None:
+        return {"connected": False, "oauth_configured": google_oauth_configured()}
+    return {
+        "connected": True,
+        "email": account.google_email,
+        "from_name": account.from_name,
+        "oauth_configured": google_oauth_configured(),
+    }
+
+
+@app.get("/v1/google/connect")
+async def google_connect(user=Depends(get_current_user)):
+    """Return the Google consent URL the frontend should open."""
+    if not google_oauth_configured():
+        raise HTTPException(status_code=503, detail="Google connect is not configured on the server.")
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": f"{GMAIL_SEND_SCOPE} https://www.googleapis.com/auth/userinfo.email",
+        "access_type": "offline",
+        "prompt": "consent",   # force a refresh_token every time
+        "state": _make_oauth_state(user["uid"]),
+    }
+    return {"url": f"{GOOGLE_AUTH_URL}?{urllib.parse.urlencode(params)}"}
+
+
+@app.get("/v1/google/callback")
+async def google_callback(
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """Google redirects here after consent. Exchange the code, store the refresh
+    token, then bounce the browser back to the frontend Settings page."""
+    frontend = FRONTEND_URL.rstrip("/")
+
+    def _back(status: str) -> RedirectResponse:
+        return RedirectResponse(url=f"{frontend}/settings?google={status}")
+
+    if error or not code or not state:
+        return _back("error")
+
+    uid = _read_oauth_state(state)
+    if uid is None:
+        return _back("expired")
+
+    # Exchange the authorization code for tokens.
+    try:
+        data = urllib.parse.urlencode({
+            "code": code,
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "redirect_uri": GOOGLE_REDIRECT_URI,
+            "grant_type": "authorization_code",
+        }).encode("utf-8")
+        req = urllib.request.Request(GOOGLE_TOKEN_URL, data=data, method="POST")
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            tokens = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        print(f"[google] token exchange failed: {e}")
+        return _back("error")
+
+    refresh_token = tokens.get("refresh_token")
+    access_token = tokens.get("access_token")
+    if not refresh_token:
+        # Happens if the user connected before and Google didn't re-issue one.
+        return _back("no_refresh")
+
+    # Look up which Gmail address was connected.
+    google_email = ""
+    try:
+        ui_req = urllib.request.Request(
+            GOOGLE_USERINFO_URL, headers={"Authorization": f"Bearer {access_token}"}
+        )
+        with urllib.request.urlopen(ui_req, timeout=20) as resp:
+            google_email = json.loads(resp.read().decode("utf-8")).get("email", "")
+    except Exception as e:
+        print(f"[google] userinfo failed: {e}")
+
+    # Upsert the connected account (one per user).
+    account = (
+        await session.execute(select(GoogleAccount).where(GoogleAccount.user_id == int(uid)))
+    ).scalar_one_or_none()
+    if account is None:
+        account = GoogleAccount(user_id=int(uid))
+        session.add(account)
+    account.google_email = google_email
+    account.refresh_token_encrypted = crypto.encrypt(refresh_token)
+    await session.commit()
+
+    return _back("connected")
+
+
+@app.delete("/v1/google")
+async def google_disconnect(
+    user=Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    account = (
+        await session.execute(select(GoogleAccount).where(GoogleAccount.user_id == int(user["uid"])))
+    ).scalar_one_or_none()
+    if account is not None:
+        await session.delete(account)
+        await session.commit()
+    return {"message": "Google account disconnected"}
+
+# ============================================================
 #  EMAIL ACTIVITY LOG (dashboard / Firebase auth)
 # ============================================================
 
@@ -566,20 +761,21 @@ async def send_mail(
                    "Check your inbox or resend the verification email from the dashboard.",
         )
 
-    provider = get_shared_provider()
-    if provider is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Sending is temporarily unavailable (mailer not configured).",
-        )
-
     if not req.text and not req.html:
         raise HTTPException(status_code=422, detail="Provide at least one of 'text' or 'html'.")
+
+    # Prefer the user's own connected Gmail account (sends AS their address).
+    provider = await get_user_gmail_provider(session, uid)
+    if provider is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Connect your Google account first (Settings → Connect Google) to send email.",
+        )
 
     # Enforce per-user + global daily quota.
     await check_send_quota(session, uid)
 
-    # The user's own address becomes Reply-To; default it to the account email.
+    # The email goes out AS the connected Gmail address.
     from_email = req.from_email or owner.email
 
     log = EmailLog(

@@ -1,17 +1,23 @@
 """
 Email delivery providers.
 
-A thin abstraction so the actual sending backend is swappable. Today the only
-implementation is GmailProvider, which sends through the user's OAuth-connected
-Gmail account (reused by both the legacy campaign flow and the new email API).
-To add Amazon SES, Brevo, etc. later, implement EmailProvider.send and select
-the provider where it's constructed — no API/route changes needed.
+A thin abstraction so the actual sending backend is swappable. Implementations:
+  - GmailApiProvider: sends through a user's OAuth-connected Gmail account via the
+    Gmail HTTP API (works on hosts that block outbound SMTP).
+  - SharedSmtpProvider: sends through MailFlow's own shared SMTP account.
+To add Amazon SES, Brevo, etc. later, implement EmailProvider.send and select the
+provider where it's constructed — no API/route changes needed.
 """
 
 from __future__ import annotations
 
+import base64
+import json
 import smtplib
 import ssl
+import urllib.error
+import urllib.parse
+import urllib.request
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional, Protocol
@@ -133,3 +139,101 @@ class SharedSmtpProvider:
         except Exception as e:
             raise ProviderError(f"Send failed: {e}") from e
         return msg.get("Message-ID", "")
+
+
+class GmailApiProvider:
+    """Sends through a user's own Gmail account via the Gmail HTTP API.
+
+    Uses the user's stored OAuth refresh token to mint a short-lived access token,
+    then calls users.messages.send. The email goes out AS the connected Gmail
+    address (Gmail sets the authenticated account as the From). Works on hosts
+    that block outbound SMTP, since it's all HTTPS. Build via from_refresh_token().
+    """
+
+    TOKEN_URL = "https://oauth2.googleapis.com/token"
+    SEND_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+
+    def __init__(self, client_id: str, client_secret: str, refresh_token: str,
+                 sender_email: str, from_name: str = ""):
+        if not (client_id and client_secret and refresh_token):
+            raise ProviderError("Google account is not connected")
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.refresh_token = refresh_token
+        self.sender_email = sender_email
+        self.from_name = from_name
+
+    @classmethod
+    def from_refresh_token(cls, refresh_token: str, sender_email: str, from_name: str = "") -> "GmailApiProvider":
+        from config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+        return cls(
+            client_id=GOOGLE_CLIENT_ID,
+            client_secret=GOOGLE_CLIENT_SECRET,
+            refresh_token=refresh_token,
+            sender_email=sender_email,
+            from_name=from_name,
+        )
+
+    def _access_token(self) -> str:
+        data = urllib.parse.urlencode({
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+            "refresh_token": self.refresh_token,
+            "grant_type": "refresh_token",
+        }).encode("utf-8")
+        req = urllib.request.Request(self.TOKEN_URL, data=data, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+            return body["access_token"]
+        except urllib.error.HTTPError as e:
+            try:
+                detail = json.loads(e.read().decode("utf-8")).get("error_description", str(e))
+            except Exception:
+                detail = str(e)
+            raise ProviderError(f"Google auth failed (reconnect your account): {detail}") from e
+        except Exception as e:
+            raise ProviderError(f"Google auth failed: {e}") from e
+
+    def send(
+        self,
+        *,
+        from_name: str,
+        from_email: str,          # ignored for the envelope; Gmail sends AS the connected account
+        to_email: str,
+        subject: str,
+        text: Optional[str] = None,
+        html: Optional[str] = None,
+    ) -> str:
+        msg = build_mime(
+            from_name=from_name or self.from_name,
+            from_email=self.sender_email,   # Gmail forces From == authenticated account
+            to_email=to_email,
+            subject=subject,
+            text=text,
+            html=html,
+        )
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
+        token = self._access_token()
+        payload = json.dumps({"raw": raw}).encode("utf-8")
+        req = urllib.request.Request(
+            self.SEND_URL,
+            data=payload,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+            return body.get("id", "")
+        except urllib.error.HTTPError as e:
+            try:
+                detail = json.loads(e.read().decode("utf-8")).get("error", {}).get("message", str(e))
+            except Exception:
+                detail = str(e)
+            raise ProviderError(f"Gmail send failed: {detail}") from e
+        except Exception as e:
+            raise ProviderError(f"Gmail send failed: {e}") from e
