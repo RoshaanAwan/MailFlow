@@ -170,6 +170,14 @@ class CampaignRequest(BaseModel):
     sender_email: str
     delay_seconds: int = 10
     daily_limit: int = 20
+    # --- Optional HTML email template footer ---
+    # When any footer field is set, the campaign is sent as a styled HTML email
+    # with this footer. Otherwise it sends as before (plain text).
+    footer_logo_url: Optional[str] = ""     # hosted image URL (logo/banner)
+    footer_tagline: Optional[str] = ""      # one-line tagline under the logo
+    footer_address: Optional[str] = ""      # company / mailing address
+    footer_links: Optional[str] = ""        # "Label|https://url, Label2|https://url2"
+    footer_unsubscribe: Optional[str] = 'To unsubscribe, reply with "unsubscribe".'
 
 class RegisterRequest(BaseModel):
     email: EmailStr
@@ -242,6 +250,107 @@ def _safe_format(template: str, name: str, company: str) -> str:
             return "{" + key + "}"
     return template.format_map(_Default(name=name, company=company))
 
+
+def _html_escape(s: str) -> str:
+    """Minimal HTML escaping for user-supplied text placed into the template."""
+    return (
+        (s or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def campaign_has_html_template(config: "CampaignRequest") -> bool:
+    """True if any footer field is set, meaning we should send styled HTML."""
+    return any([
+        (config.footer_logo_url or "").strip(),
+        (config.footer_tagline or "").strip(),
+        (config.footer_address or "").strip(),
+        (config.footer_links or "").strip(),
+    ])
+
+
+def _render_footer_links(raw: str) -> str:
+    """Parse 'Label|https://url, Label2|https://url2' into footer link anchors."""
+    parts = []
+    for chunk in (raw or "").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        label, _, url = chunk.partition("|")
+        label, url = label.strip(), url.strip()
+        if not url:
+            continue
+        parts.append(
+            f'<a href="{_html_escape(url)}" style="color:#6366f1;text-decoration:none;margin:0 8px;">'
+            f'{_html_escape(label or url)}</a>'
+        )
+    return " · ".join(parts)
+
+
+def render_email_html(body_text: str, config: "CampaignRequest") -> str:
+    """Render a personalized plain-text body + footer fields into an HTML email.
+
+    Uses table-based layout and inline styles for broad email-client support.
+    `body_text` is already personalized (placeholders filled) plain text; newlines
+    become <br> and the whole body is HTML-escaped so it renders safely.
+    """
+    body_html = _html_escape(body_text).replace("\n", "<br>")
+
+    logo = (config.footer_logo_url or "").strip()
+    logo_html = (
+        f'<img src="{_html_escape(logo)}" alt="" width="140" '
+        f'style="max-width:140px;height:auto;display:block;margin:0 auto 12px;border:0;" />'
+        if logo else ""
+    )
+    tagline = (config.footer_tagline or "").strip()
+    tagline_html = (
+        f'<div style="font-size:14px;color:#374151;font-weight:600;margin-bottom:6px;">'
+        f'{_html_escape(tagline)}</div>' if tagline else ""
+    )
+    links_html = _render_footer_links(config.footer_links or "")
+    links_row = (
+        f'<div style="margin:10px 0;font-size:13px;">{links_html}</div>' if links_html else ""
+    )
+    address = (config.footer_address or "").strip()
+    address_html = (
+        f'<div style="font-size:12px;color:#6b7280;line-height:1.5;margin-top:6px;">'
+        f'{_html_escape(address).replace(chr(10), "<br>")}</div>' if address else ""
+    )
+    unsub = (config.footer_unsubscribe or "").strip()
+    unsub_html = (
+        f'<div style="font-size:11px;color:#9ca3af;margin-top:12px;">{_html_escape(unsub)}</div>'
+        if unsub else ""
+    )
+
+    return f"""\
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f4f4f7;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f7;padding:24px 0;">
+    <tr><td align="center">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0"
+             style="max-width:600px;width:100%;background:#ffffff;border-radius:10px;overflow:hidden;
+                    font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+        <tr><td style="padding:32px 40px;color:#1f2937;font-size:15px;line-height:1.6;">
+          {body_html}
+        </td></tr>
+        <tr><td style="border-top:1px solid #eaeaea;padding:24px 40px;text-align:center;background:#fafafa;">
+          {logo_html}
+          {tagline_html}
+          {links_row}
+          {address_html}
+          {unsub_html}
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+
 def send_campaign_task(campaign_id: str, contacts: list, config: CampaignRequest,
                        gmail_refresh_token: str, gmail_sender_email: str):
     campaigns[campaign_id] = {"status": "running", "sent": 0, "failed": 0, "total": len(contacts)}
@@ -273,12 +382,17 @@ def send_campaign_task(campaign_id: str, contacts: list, config: CampaignRequest
             subject = _safe_format(config.subject, name, company)
             body    = _safe_format(config.body, name, company)
 
+            # When footer fields are set, send a styled HTML email (with the plain
+            # body kept as the text fallback); otherwise send plain text as before.
+            html = render_email_html(body, config) if campaign_has_html_template(config) else None
+
             provider.send(
                 from_name=config.sender_name,
                 from_email=config.sender_email,
                 to_email=email,
                 subject=subject,
                 text=body,
+                html=html,
             )
             campaigns[campaign_id]["sent"] += 1
         except Exception as e:
@@ -466,6 +580,11 @@ async def start_campaign(
     sender_email: str = Form(...),
     delay_seconds: int = Form(10),
     daily_limit: int = Form(20),
+    footer_logo_url: str = Form(""),
+    footer_tagline: str = Form(""),
+    footer_address: str = Form(""),
+    footer_links: str = Form(""),
+    footer_unsubscribe: str = Form('To unsubscribe, reply with "unsubscribe".'),
     user=Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -490,6 +609,11 @@ async def start_campaign(
         sender_email=sender_email,
         delay_seconds=delay_seconds,
         daily_limit=daily_limit,
+        footer_logo_url=footer_logo_url,
+        footer_tagline=footer_tagline,
+        footer_address=footer_address,
+        footer_links=footer_links,
+        footer_unsubscribe=footer_unsubscribe,
     )
 
     contents = await file.read()

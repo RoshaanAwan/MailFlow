@@ -33,6 +33,11 @@ export default function NewCampaign({ user, setPage }) {
     delay_seconds: 10,
     daily_limit:   20,
     sheet_name:    "Email Campaign Log",
+    footer_logo_url:    "",
+    footer_tagline:     "",
+    footer_address:     "",
+    footer_links:       "",
+    footer_unsubscribe: 'To unsubscribe, reply with "unsubscribe".',
   });
   
   const [file, setFile]             = useState(null);
@@ -64,6 +69,51 @@ export default function NewCampaign({ user, setPage }) {
   };
 
   const update = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  // Escape user text for safe rendering inside the preview HTML.
+  const esc = (s) => (s || "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+  // A live HTML preview mirroring the backend's render_email_html(). Placeholders
+  // are shown with sample values so you see roughly what a recipient gets.
+  const previewHtml = useMemo(() => {
+    const sample = (s) => (s || "").replace(/\{name\}/g, "Alex").replace(/\{company\}/g, "Acme Inc");
+    const bodyHtml = esc(sample(form.body)).replace(/\n/g, "<br>");
+
+    const logo = (form.footer_logo_url || "").trim();
+    const logoHtml = logo
+      ? `<img src="${esc(logo)}" alt="" width="140" style="max-width:140px;height:auto;display:block;margin:0 auto 12px;border:0;" />`
+      : "";
+    const tagline = (form.footer_tagline || "").trim();
+    const taglineHtml = tagline
+      ? `<div style="font-size:14px;color:#374151;font-weight:600;margin-bottom:6px;">${esc(tagline)}</div>` : "";
+    const linksHtml = (form.footer_links || "").split(",").map(c => {
+      const t = c.trim(); if (!t) return "";
+      const [label, url] = t.split("|").map(x => (x || "").trim());
+      if (!url) return "";
+      return `<a href="${esc(url)}" style="color:#6366f1;text-decoration:none;margin:0 8px;">${esc(label || url)}</a>`;
+    }).filter(Boolean).join(" · ");
+    const linksRow = linksHtml ? `<div style="margin:10px 0;font-size:13px;">${linksHtml}</div>` : "";
+    const address = (form.footer_address || "").trim();
+    const addressHtml = address
+      ? `<div style="font-size:12px;color:#6b7280;line-height:1.5;margin-top:6px;">${esc(address).replace(/\n/g, "<br>")}</div>` : "";
+    const unsub = (form.footer_unsubscribe || "").trim();
+    const unsubHtml = unsub
+      ? `<div style="font-size:11px;color:#9ca3af;margin-top:12px;">${esc(unsub)}</div>` : "";
+
+    const hasFooter = logo || tagline || linksHtml || address;
+    const footer = hasFooter || unsub
+      ? `<tr><td style="border-top:1px solid #eaeaea;padding:24px 40px;text-align:center;background:#fafafa;">
+           ${logoHtml}${taglineHtml}${linksRow}${addressHtml}${unsubHtml}
+         </td></tr>` : "";
+
+    return `<table role="presentation" width="600" cellpadding="0" cellspacing="0"
+        style="max-width:600px;width:100%;background:#ffffff;border-radius:10px;overflow:hidden;
+               font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0 auto;">
+        <tr><td style="padding:32px 40px;color:#1f2937;font-size:15px;line-height:1.6;">${bodyHtml}</td></tr>
+        ${footer}
+      </table>`;
+  }, [form.body, form.footer_logo_url, form.footer_tagline, form.footer_links, form.footer_address, form.footer_unsubscribe]);
 
   const handleFile = (e) => {
     const f = e.target.files[0];
@@ -108,6 +158,11 @@ export default function NewCampaign({ user, setPage }) {
       formData.append("delay_seconds", form.delay_seconds);
       formData.append("daily_limit",   form.daily_limit);
       formData.append("sheet_name",    form.sheet_name);
+      formData.append("footer_logo_url",    form.footer_logo_url);
+      formData.append("footer_tagline",     form.footer_tagline);
+      formData.append("footer_address",     form.footer_address);
+      formData.append("footer_links",       form.footer_links);
+      formData.append("footer_unsubscribe", form.footer_unsubscribe);
 
       const res  = await fetch(`${API}/campaign/start`, {
         method: "POST",
@@ -282,6 +337,78 @@ export default function NewCampaign({ user, setPage }) {
             onChange={e=>update("body", e.target.value)} 
           />
           <p className="field-hint">Dynamic markers from your CSV: {"{name}"}, {"{company}"}</p>
+        </div>
+      </section>
+
+      {/* --- Step 3.5: Email Footer / Template --- */}
+      <section className="form-section">
+        <div className="section-head">
+          <span className="section-icon"><Icons.Template /></span>
+          <span className="section-label">Email Footer &amp; Branding</span>
+        </div>
+        <p className="field-hint" style={{ marginTop: "-0.25rem", marginBottom: "1rem" }}>
+          Fill any field to send a styled HTML email with a footer. Leave all blank to send plain text.
+        </p>
+
+        <div className="form-group">
+          <label className="field-label">Footer logo / banner image URL</label>
+          <input
+            className="input-field"
+            value={form.footer_logo_url}
+            onChange={e=>update("footer_logo_url", e.target.value)}
+            placeholder="https://yoursite.com/logo.png"
+          />
+          <p className="field-hint">Must be a public image URL (hosted online), not a local file.</p>
+        </div>
+
+        <div className="form-group">
+          <label className="field-label">Tagline</label>
+          <input
+            className="input-field"
+            value={form.footer_tagline}
+            onChange={e=>update("footer_tagline", e.target.value)}
+            placeholder="Full Stack Engineer · Building for startups"
+          />
+        </div>
+
+        <div className="form-group">
+          <label className="field-label">Footer links</label>
+          <input
+            className="input-field"
+            value={form.footer_links}
+            onChange={e=>update("footer_links", e.target.value)}
+            placeholder="Website|https://mysite.com, LinkedIn|https://linkedin.com/in/me"
+          />
+          <p className="field-hint">Format: <code>Label|https://url</code>, separated by commas.</p>
+        </div>
+
+        <div className="form-group">
+          <label className="field-label">Address</label>
+          <input
+            className="input-field"
+            value={form.footer_address}
+            onChange={e=>update("footer_address", e.target.value)}
+            placeholder="123 Startup Street, Lahore, Pakistan"
+          />
+        </div>
+
+        <div className="form-group">
+          <label className="field-label">Unsubscribe line</label>
+          <input
+            className="input-field"
+            value={form.footer_unsubscribe}
+            onChange={e=>update("footer_unsubscribe", e.target.value)}
+          />
+        </div>
+
+        {/* --- Live preview --- */}
+        <div className="form-group">
+          <label className="field-label">Live preview</label>
+          <div
+            style={{ background: "#f4f4f7", padding: "20px", borderRadius: "10px", overflow: "auto" }}
+            dangerouslySetInnerHTML={{ __html: previewHtml }}
+          />
+          <p className="field-hint">Placeholders shown with sample values ({"{name}"} → Alex, {"{company}"} → Acme Inc).</p>
         </div>
       </section>
 
