@@ -40,26 +40,22 @@ export default function NewCampaign({ user, setPage }) {
   const [status, setStatus]       = useState(null);
   const [error, setError]         = useState("");
   const [loading, setLoading]     = useState(false);
-  const [senderReady, setSenderReady] = useState(true);
-  const [quota, setQuota] = useState(null);
+  const [gmailConnected, setGmailConnected] = useState(true);
 
   useEffect(() => {
-    checkQuota();
+    checkGmail();
   }, []);
 
-  const checkQuota = async () => {
+  const checkGmail = async () => {
     try {
       const token = await auth.currentUser.getIdToken();
-      const res   = await fetch(`${API}/v1/quota`, {
+      const res   = await fetch(`${API}/auth/gmail/status`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
-      if (res.ok) {
-        setQuota(data);
-        setSenderReady(data.sender_ready);
-      }
+      setGmailConnected(data.connected);
     } catch (e) {
-      console.error("Quota check failed");
+      console.error("Gmail check failed");
     }
   };
 
@@ -70,26 +66,8 @@ export default function NewCampaign({ user, setPage }) {
     if (f) setFile(f);
   };
 
-  const downloadSampleCsv = (e) => {
-    // Don't trigger the file picker on the wrapping <label>.
-    e.preventDefault();
-    e.stopPropagation();
-    const csv =
-      "name,email,company\n" +
-      "Alice Johnson,alice@example.com,Acme Corp\n" +
-      "Bob Smith,bob@example.com,Globex Inc\n" +
-      "Carla Mendes,carla@example.com,Initech\n";
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "sample_contacts.csv";
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
   const startCampaign = async () => {
-    if (!senderReady)       return setError("Sending is temporarily unavailable. Please try again later.");
+    if (!gmailConnected)    return setError("Authorization required. Please connect Gmail in settings.");
     if (!file)              return setError("Required: Contacts dataset (CSV).");
     if (!form.campaign_name) return setError("Required: Unique campaign identifier.");
     if (!form.sender_email) return setError("Required: Verified sender email address.");
@@ -177,18 +155,15 @@ export default function NewCampaign({ user, setPage }) {
         <p className="campaign-subtitle">Build and deploy a personalized email automation workflow.</p>
       </header>
 
-      {!senderReady && (
+      {!gmailConnected && (
         <div className="warn-alert">
           <Icons.Warn />
           <div>
-            <strong>Sending is temporarily unavailable.</strong> The delivery service isn't configured yet.
+            <strong>Gmail authorization required.</strong> 
+            <span style={{ marginLeft: 8, cursor:"pointer", textDecoration:"underline" }} onClick={()=>setPage("settings")}>
+              Configure service connection →
+            </span>
           </div>
-        </div>
-      )}
-      {quota && senderReady && (
-        <div className="warn-alert" style={{ background: "rgba(99,102,241,0.06)", borderColor: "rgba(99,102,241,0.3)", color: "var(--text-secondary)" }}>
-          <Icons.Warn />
-          <div>You have <strong>{quota.remaining}</strong> of {quota.limit} daily sends left.</div>
         </div>
       )}
 
@@ -255,7 +230,7 @@ export default function NewCampaign({ user, setPage }) {
             />
           </div>
         </div>
-        <p className="field-hint">Replies go to this address. Emails are delivered via MailFlow.</p>
+        <p className="field-hint">Address must be authorized via the connected Gmail security token.</p>
       </section>
 
       {/* --- Step 3: Template --- */}
@@ -279,7 +254,7 @@ export default function NewCampaign({ user, setPage }) {
             value={form.body} 
             onChange={e=>update("body", e.target.value)} 
           />
-          <p className="field-hint">Dynamic markers from your CSV: {"{name}"}, {"{company}"}</p>
+          <p className="field-hint">Dynamic markers: {"{name}"}, {"{company}"}, {"{industry}"}</p>
         </div>
       </section>
 
@@ -293,14 +268,9 @@ export default function NewCampaign({ user, setPage }) {
           <input type="file" accept=".csv" onChange={handleFile} style={{ display:"none" }} />
           <Icons.Upload />
           <span className="upload-text">
-            {file ? `✓ ${file.name}` : "Drop contacts.csv or click to browse"}
+            {file ? `✓ ${file.name}` : "Drop contacts.csv or click to browser"}
           </span>
-          <p className="field-hint">
-            Required headers: <code>name</code>, <code>email</code> · Optional: <code>company</code>
-          </p>
-          <button type="button" className="sample-csv-link" onClick={downloadSampleCsv}>
-            ↓ Download sample CSV
-          </button>
+          <p className="field-hint">Headers required: name, email, company</p>
         </label>
       </section>
 
@@ -310,7 +280,7 @@ export default function NewCampaign({ user, setPage }) {
         <button 
           className="btn-primary" 
           onClick={startCampaign} 
-          disabled={loading || !senderReady}
+          disabled={loading || !gmailConnected}
         >
           {loading ? "Deploying..." : "Launch Campaign"}
           {!loading && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polyline points="22 2 15 22 11 13 2 9 22 2"/></svg>}

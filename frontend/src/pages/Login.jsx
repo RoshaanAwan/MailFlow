@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { login, register, forgotPassword } from "../auth";
+import { auth } from "../App";
+import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  GoogleAuthProvider,
+  signInWithPopup
+} from "firebase/auth";
 import "./Login.css";
 
 /* --- Professional SVG Icons --- */
@@ -16,6 +22,9 @@ const Icons = {
   ),
   Automate: () => (
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 2a2 2 0 0 0-2 2v5H4a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h5v5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2v-5h5a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2h-5V4a2 2 0 0 0-2-2h-2z"/></svg>
+  ),
+  Google: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c3.11 0 5.72-1.03 7.63-2.79l-3.57-2.77c-.99.66-2.26 1.05-4.06 1.05-3.11 0-5.75-2.11-6.7-4.94H1.14v2.86C3.06 20.21 7.22 23 12 23z" fill="#34A853"/><path d="M5.3 13.59c-.24-.71-.38-1.47-.38-2.26 0-.79.14-1.55.38-2.26V6.21H1.14C.41 7.64 0 9.26 0 11c0 1.74.41 3.36 1.14 4.79l4.16-3.2z" fill="#FBBC05"/><path d="M12 4.19c1.69 0 3.2.58 4.39 1.72l3.3-3.3C17.71 1.03 15.11 0 12 0 7.22 0 3.06 2.79 1.14 6.21L5.3 9.07c.95-2.83 3.59-4.88 6.7-4.88z" fill="#EA4335"/></svg>
   )
 };
 
@@ -25,8 +34,6 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError]       = useState("");
   const [loading, setLoading]   = useState(false);
-  const [forgotMode, setForgotMode] = useState(false);
-  const [notice, setNotice]     = useState("");
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -34,28 +41,22 @@ export default function Login() {
     setLoading(true); setError("");
     try {
       if (isSignup) {
-        await register(email, password);
+        await createUserWithEmailAndPassword(auth, email, password);
       } else {
-        await login(email, password);
+        await signInWithEmailAndPassword(auth, email, password);
       }
-      // onAuthStateChanged in App.jsx redirects to the dashboard.
     } catch (e) {
-      setError(e.message);
+      setError(e.message.replace("Firebase: ", "").replace(/\(.*\)/, ""));
     }
     setLoading(false);
   };
 
-  const handleForgot = async (e) => {
-    e.preventDefault();
-    if (!email) return setError("Enter your email to receive a reset link.");
-    setLoading(true); setError(""); setNotice("");
+  const handleGoogle = async () => {
     try {
-      const msg = await forgotPassword(email);
-      setNotice(msg);
+      await signInWithPopup(auth, new GoogleAuthProvider());
     } catch (e) {
-      setError(e.message);
+      setError("Authorization Guard Failed: " + e.message);
     }
-    setLoading(false);
   };
 
   return (
@@ -108,83 +109,49 @@ export default function Login() {
             <span>MailFlow</span>
           </div>
           <div className="auth-header">
-            <h2 className="auth-title">
-              {forgotMode ? "Reset Access" : isSignup ? "Create Identity" : "Verified Access"}
-            </h2>
+            <h2 className="auth-title">{isSignup ? "Create Identity" : "Verified Access"}</h2>
             <p className="auth-subtitle">
-              {forgotMode
-                ? "Enter your email and we'll send a reset link."
-                : isSignup ? "Join the high-performance pipeline." : "Resume your automated workflows."}
+              {isSignup ? "Join the high-performance pipeline." : "Resume your automated workflows."}
             </p>
           </div>
 
           {error && <div className="auth-error">{error}</div>}
-          {notice && <div className="auth-error" style={{ background: "rgba(16,185,129,0.08)", color: "#10b981" }}>{notice}</div>}
 
-          {forgotMode ? (
-            <form onSubmit={handleForgot}>
-              <div className="form-group" style={{ animationDelay: "0.1s" }}>
-                <span className="input-label">System Identity (Email)</span>
-                <input
-                  className="auth-input"
-                  type="email"
-                  value={email}
-                  onChange={e=>setEmail(e.target.value)}
-                  placeholder="identity@example.com"
-                />
-              </div>
-              <button className="btn-auth" type="submit" disabled={loading} style={{ animationDelay: "0.2s" }}>
-                {loading ? "Sending..." : "Send Reset Link"}
-              </button>
-            </form>
-          ) : (
-            <form onSubmit={handleSubmit}>
-              <div className="form-group" style={{ animationDelay: "0.1s" }}>
-                <span className="input-label">System Identity (Email)</span>
-                <input
-                  className="auth-input"
-                  type="email"
-                  value={email}
-                  onChange={e=>setEmail(e.target.value)}
-                  placeholder="identity@example.com"
-                />
-              </div>
-              <div className="form-group" style={{ animationDelay: "0.15s" }}>
-                <span className="input-label">Access Code (Password)</span>
-                <input
-                  className="auth-input"
-                  type="password"
-                  value={password}
-                  onChange={e=>setPassword(e.target.value)}
-                  placeholder="••••••••"
-                />
-              </div>
-              {!isSignup && (
-                <div style={{ textAlign: "right", marginBottom: "0.5rem" }}>
-                  <span className="auth-link" onClick={()=>{ setForgotMode(true); setError(""); setNotice(""); }}>
-                    Forgot password?
-                  </span>
-                </div>
-              )}
-              <button className="btn-auth" type="submit" disabled={loading} style={{ animationDelay: "0.2s" }}>
-                {loading ? "Verifying..." : isSignup ? "Initialize Profile" : "Grant Access"}
-              </button>
-            </form>
-          )}
+          <form onSubmit={handleSubmit}>
+            <div className="form-group" style={{ animationDelay: "0.1s" }}>
+              <span className="input-label">System Identity (Email)</span>
+              <input 
+                className="auth-input" 
+                type="email" 
+                value={email} 
+                onChange={e=>setEmail(e.target.value)} 
+                placeholder="identity@example.com" 
+              />
+            </div>
+            <div className="form-group" style={{ animationDelay: "0.15s" }}>
+              <span className="input-label">Access Code (Password)</span>
+              <input 
+                className="auth-input" 
+                type="password" 
+                value={password} 
+                onChange={e=>setPassword(e.target.value)} 
+                placeholder="••••••••" 
+              />
+            </div>
+            <button className="btn-auth" type="submit" disabled={loading} style={{ animationDelay: "0.2s" }}>
+              {loading ? "Verifying..." : isSignup ? "Initialize Profile" : "Grant Access"}
+            </button>
+          </form>
+
+          <button className="btn-google" onClick={handleGoogle} style={{ animationDelay: "0.25s" }}>
+            <Icons.Google /> Continue via Google Service
+          </button>
 
           <footer className="auth-footer" style={{ animationDelay: "0.3s" }}>
-            {forgotMode ? (
-              <span className="auth-link" onClick={()=>{ setForgotMode(false); setError(""); setNotice(""); }}>
-                ← Back to sign in
-              </span>
-            ) : (
-              <>
-                {isSignup ? "Already registered?" : "New to the pipeline?"}
-                <span className="auth-link" onClick={()=>setIsSignup(!isSignup)}>
-                  {isSignup ? "Sign in" : "Initialize profile"}
-                </span>
-              </>
-            )}
+            {isSignup ? "Already registered?" : "New to the pipeline?"}
+            <span className="auth-link" onClick={()=>setIsSignup(!isSignup)}>
+              {isSignup ? "Sign in" : "Initialize profile"}
+            </span>
           </footer>
         </div>
       </main>

@@ -9,12 +9,7 @@ __pycache__/
 *$py.class
 env/
 venv/
-.venv/
 .env
-
-# Local data stores (dev fallback DB + legacy JSON persistence)
-backend/mailflow.db
-backend/storage_data.json
 
 # Credentials
 backend/client_secret.json

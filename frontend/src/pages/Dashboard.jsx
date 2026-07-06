@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
 import { auth } from "../App";
-import { resendVerification } from "../auth";
 import "./Dashboard.css";
 
 const API = import.meta.env.VITE_API_URL || "/api";
@@ -56,16 +55,6 @@ const StatusBadge = ({ status }) => {
 export default function Dashboard({ user }) {
   const [campaigns, setCampaigns] = useState({});
   const [loading, setLoading]     = useState(true);
-  const [resendMsg, setResendMsg] = useState("");
-
-  const handleResend = async () => {
-    setResendMsg("Sending…");
-    try {
-      setResendMsg(await resendVerification());
-    } catch (e) {
-      setResendMsg(e.message);
-    }
-  };
 
   const fetchCampaigns = async () => {
     try {
@@ -106,16 +95,6 @@ export default function Dashboard({ user }) {
           <p className="dashboard-subtitle">Monitoring your automated email workflows</p>
         </div>
       </header>
-
-      {user && user.email_verified === false && (
-        <div className="verify-banner">
-          <span>
-            ⚠ Please verify your email address to enable sending via the API. Check your inbox.
-          </span>
-          <button className="verify-resend" onClick={handleResend}>Resend email</button>
-          {resendMsg && <span className="verify-msg">{resendMsg}</span>}
-        </div>
-      )}
 
       <div className="stats-grid">
         <StatCard 
