@@ -12,12 +12,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, BackgroundTasks, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
-<<<<<<< HEAD
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, EmailStr
-=======
 from pydantic import BaseModel, EmailStr, Field
->>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
 from typing import Optional, List
 import pandas as pd
 import time
@@ -45,19 +41,17 @@ from config import (
     sender_configured,
     smtp_configured,
 )
-<<<<<<< HEAD
-from providers import SharedSmtpProvider, GmailApiProvider, ProviderError
+from providers import (
+    SharedSmtpProvider,
+    GmailApiProvider,
+    ResendProvider,
+    UserSmtpProvider,
+    ProviderError,
+)
 from db import get_session, init_db
-from models import ApiKey, EmailLog, User, GoogleAccount
+from models import ApiKey, EmailLog, User, GoogleAccount, Domain, SmtpCredential
 import crypto
-=======
-from providers import SharedSmtpProvider, ResendProvider, ProviderError, UserSmtpProvider
-from db import get_session, init_db
-from models import ApiKey, EmailLog, User, Domain, SmtpCredential
-import crypto
-import json
 import resend_domains
->>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
 from api_keys import generate_api_key, get_api_key_user
 from auth import (
     consume_auth_token,
@@ -85,23 +79,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="MailFlow API", version="1.0.0", lifespan=lifespan)
 
 # Allow the React frontend to connect. In production set CORS_ORIGINS (or rely on
-<<<<<<< HEAD
 # FRONTEND_URL); the wildcard is a dev-only fallback. Browsers forbid "*" with
 # credentials, so credentials are only enabled when explicit origins are set.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS or ["*"],
     allow_credentials=bool(CORS_ORIGINS),
-=======
-# FRONTEND_URL) to your deployed frontend domain(s); the wildcard is a dev-only
-# fallback. Note: the browser forbids "*" together with credentials, so we only
-# enable allow_credentials when explicit origins are configured.
-_explicit_origins = CORS_ORIGINS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_explicit_origins or ["*"],
-    allow_credentials=bool(_explicit_origins),
->>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -732,7 +715,6 @@ async def revoke_key(
     return {"message": "API key revoked"}
 
 # ============================================================
-<<<<<<< HEAD
 #  GOOGLE ACCOUNT CONNECT (OAuth -> send via user's Gmail)
 # ============================================================
 
@@ -884,7 +866,9 @@ async def google_disconnect(
         await session.delete(account)
         await session.commit()
     return {"message": "Google account disconnected"}
-=======
+
+
+# ============================================================
 #  CUSTOMER SMTP CREDENTIALS (BYO-SMTP, dashboard / JWT auth)
 # ============================================================
 
@@ -986,7 +970,6 @@ async def test_smtp(
     except ProviderError as e:
         return {"ok": False, "error": str(e)}
     return {"ok": True}
->>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
 
 # ============================================================
 #  EMAIL ACTIVITY LOG (dashboard / Firebase auth)
@@ -1047,74 +1030,69 @@ async def send_mail(
     if not req.text and not req.html:
         raise HTTPException(status_code=422, detail="Provide at least one of 'text' or 'html'.")
 
-<<<<<<< HEAD
-    # Prefer the user's own connected Gmail account (sends AS their address).
-    provider = await get_user_gmail_provider(session, uid)
-    if provider is None:
-        raise HTTPException(
-            status_code=409,
-            detail="Connect your Google account first (Settings → Connect Google) to send email.",
-        )
-
-    # Enforce per-user + global daily quota.
-    await check_send_quota(session, uid)
-
-    # The email goes out AS the connected Gmail address.
-    from_email = req.from_email or owner.email
-=======
-    # Prefer the owner's own SMTP if they've configured it (BYO-SMTP).
-    cred = (
-        await session.execute(
-            select(SmtpCredential).where(SmtpCredential.user_id == int(uid))
-        )
-    ).scalar_one_or_none()
-
-    if cred is not None:
-        # BYO-SMTP: send via the customer's own server. They own their domain and
-        # deliverability, so there's no verified-domain gate, no MailFlow quota, and
-        # any 'from' address is allowed (defaults to the SMTP login address).
-        try:
-            provider = UserSmtpProvider.from_credential(cred)
-        except ProviderError as e:
-            raise HTTPException(status_code=400, detail=f"Your SMTP settings are invalid: {e}")
-        from_email = str(req.from_email) if req.from_email else cred.username
+    # Sending backend, in priority order:
+    #   1. The user's own connected Gmail account (primary — sends AS their address).
+    #   2. BYO-SMTP if they've configured their own SMTP server.
+    #   3. The shared sending account, gated to their verified domains + quota.
+    gmail_provider = await get_user_gmail_provider(session, uid)
+    if gmail_provider is not None:
+        # Gmail: the email goes out AS the connected Gmail address.
+        provider = gmail_provider
+        await check_send_quota(session, uid)
+        from_email = req.from_email or owner.email
     else:
-        provider = get_shared_provider()
-        if provider is None:
-            raise HTTPException(
-                status_code=503,
-                detail="Sending is temporarily unavailable (mailer not configured).",
-            )
-
-        # Strict domain policy: 'from' is required and its domain must be one of the
-        # user's VERIFIED sending domains.
-        if not req.from_email:
-            raise HTTPException(
-                status_code=422,
-                detail="'from' is required and must use one of your verified domains.",
-            )
-        from_email = str(req.from_email)
-        from_domain = from_email.rsplit("@", 1)[-1].lower()
-
-        verified = (
+        cred = (
             await session.execute(
-                select(Domain).where(
-                    Domain.user_id == int(uid),
-                    Domain.name == from_domain,
-                    Domain.status == "verified",
-                )
+                select(SmtpCredential).where(SmtpCredential.user_id == int(uid))
             )
         ).scalar_one_or_none()
-        if verified is None:
-            raise HTTPException(
-                status_code=403,
-                detail=f"The domain '{from_domain}' is not a verified sending domain on your "
-                       f"account. Add and verify it in the dashboard (Domains) before sending from it.",
-            )
 
-        # Enforce per-user + global daily quota (protects the shared sending account).
-        await check_send_quota(session, uid)
->>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
+        if cred is not None:
+            # BYO-SMTP: send via the customer's own server. They own their domain and
+            # deliverability, so there's no verified-domain gate, no MailFlow quota, and
+            # any 'from' address is allowed (defaults to the SMTP login address).
+            try:
+                provider = UserSmtpProvider.from_credential(cred)
+            except ProviderError as e:
+                raise HTTPException(status_code=400, detail=f"Your SMTP settings are invalid: {e}")
+            from_email = str(req.from_email) if req.from_email else cred.username
+        else:
+            provider = get_shared_provider()
+            if provider is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Connect your Google account (Settings → Connect Google) or configure "
+                           "SMTP to send email.",
+                )
+
+            # Strict domain policy: 'from' is required and its domain must be one of the
+            # user's VERIFIED sending domains.
+            if not req.from_email:
+                raise HTTPException(
+                    status_code=422,
+                    detail="'from' is required and must use one of your verified domains.",
+                )
+            from_email = str(req.from_email)
+            from_domain = from_email.rsplit("@", 1)[-1].lower()
+
+            verified = (
+                await session.execute(
+                    select(Domain).where(
+                        Domain.user_id == int(uid),
+                        Domain.name == from_domain,
+                        Domain.status == "verified",
+                    )
+                )
+            ).scalar_one_or_none()
+            if verified is None:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"The domain '{from_domain}' is not a verified sending domain on your "
+                           f"account. Add and verify it in the dashboard (Domains) before sending from it.",
+                )
+
+            # Enforce per-user + global daily quota (protects the shared sending account).
+            await check_send_quota(session, uid)
 
     log = EmailLog(
         uid=uid,

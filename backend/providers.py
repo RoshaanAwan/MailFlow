@@ -2,13 +2,8 @@
 Email delivery providers.
 
 A thin abstraction so the actual sending backend is swappable. Implementations:
-<<<<<<< HEAD
   - GmailApiProvider: sends through a user's OAuth-connected Gmail account via the
     Gmail HTTP API (works on hosts that block outbound SMTP).
-  - SharedSmtpProvider: sends through MailFlow's own shared SMTP account.
-To add Amazon SES, Brevo, etc. later, implement EmailProvider.send and select the
-provider where it's constructed — no API/route changes needed.
-=======
   - SharedSmtpProvider: sends every user's mail through MailFlow's own shared SMTP
     account (From forced to the shared address, user's address set as Reply-To).
   - ResendProvider: sends via the Resend HTTP API from a verified domain.
@@ -16,23 +11,16 @@ provider where it's constructed — no API/route changes needed.
     From is the customer's own address, no Reply-To rewrite.
 To add Amazon SES, Brevo, etc. later, implement EmailProvider.send and select
 the provider where it's constructed — no API/route changes needed.
->>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
 """
 
 from __future__ import annotations
 
-<<<<<<< HEAD
 import base64
-=======
->>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
 import json
 import smtplib
 import ssl
 import urllib.error
-<<<<<<< HEAD
 import urllib.parse
-=======
->>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
 import urllib.request
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -157,7 +145,6 @@ class SharedSmtpProvider:
         return msg.get("Message-ID", "")
 
 
-<<<<<<< HEAD
 class GmailApiProvider:
     """Sends through a user's own Gmail account via the Gmail HTTP API.
 
@@ -211,7 +198,51 @@ class GmailApiProvider:
             raise ProviderError(f"Google auth failed (reconnect your account): {detail}") from e
         except Exception as e:
             raise ProviderError(f"Google auth failed: {e}") from e
-=======
+
+    def send(
+        self,
+        *,
+        from_name: str,
+        from_email: str,          # ignored for the envelope; Gmail sends AS the connected account
+        to_email: str,
+        subject: str,
+        text: Optional[str] = None,
+        html: Optional[str] = None,
+    ) -> str:
+        msg = build_mime(
+            from_name=from_name or self.from_name,
+            from_email=self.sender_email,   # Gmail forces From == authenticated account
+            to_email=to_email,
+            subject=subject,
+            text=text,
+            html=html,
+        )
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
+        token = self._access_token()
+        payload = json.dumps({"raw": raw}).encode("utf-8")
+        req = urllib.request.Request(
+            self.SEND_URL,
+            data=payload,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+            return body.get("id", "")
+        except urllib.error.HTTPError as e:
+            try:
+                detail = json.loads(e.read().decode("utf-8")).get("error", {}).get("message", str(e))
+            except Exception:
+                detail = str(e)
+            raise ProviderError(f"Gmail send failed: {detail}") from e
+        except Exception as e:
+            raise ProviderError(f"Gmail send failed: {e}") from e
+
+
 class UserSmtpProvider:
     """Sends through a customer's OWN SMTP credentials (BYO-SMTP).
 
@@ -273,53 +304,26 @@ class UserSmtpProvider:
             raise
         except Exception as e:
             raise ProviderError(f"SMTP connection failed: {e}") from e
->>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
 
     def send(
         self,
         *,
         from_name: str,
-<<<<<<< HEAD
-        from_email: str,          # ignored for the envelope; Gmail sends AS the connected account
-=======
         from_email: str,          # the sender address (customer's own; any address allowed)
->>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
         to_email: str,
         subject: str,
         text: Optional[str] = None,
         html: Optional[str] = None,
     ) -> str:
-<<<<<<< HEAD
-        msg = build_mime(
-            from_name=from_name or self.from_name,
-            from_email=self.sender_email,   # Gmail forces From == authenticated account
-=======
         sender = from_email or self.from_email
         msg = build_mime(
             from_name=from_name or self.from_name,
             from_email=sender,
->>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
             to_email=to_email,
             subject=subject,
             text=text,
             html=html,
         )
-<<<<<<< HEAD
-        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
-        token = self._access_token()
-        payload = json.dumps({"raw": raw}).encode("utf-8")
-        req = urllib.request.Request(
-            self.SEND_URL,
-            data=payload,
-            method="POST",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=20) as resp:
-=======
         try:
             server = self._connect()
             try:
@@ -398,23 +402,13 @@ class ResendProvider:
         )
         try:
             with urllib.request.urlopen(request, timeout=20) as resp:
->>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
                 body = json.loads(resp.read().decode("utf-8"))
             return body.get("id", "")
         except urllib.error.HTTPError as e:
             try:
-<<<<<<< HEAD
-                detail = json.loads(e.read().decode("utf-8")).get("error", {}).get("message", str(e))
-            except Exception:
-                detail = str(e)
-            raise ProviderError(f"Gmail send failed: {detail}") from e
-        except Exception as e:
-            raise ProviderError(f"Gmail send failed: {e}") from e
-=======
                 detail = json.loads(e.read().decode("utf-8")).get("message", str(e))
             except Exception:
                 detail = str(e)
             raise ProviderError(f"Resend rejected the email: {detail}") from e
         except Exception as e:
             raise ProviderError(f"Resend send failed: {e}") from e
->>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
