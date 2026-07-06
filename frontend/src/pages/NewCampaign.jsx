@@ -1,0 +1,560 @@
+import { useState, useEffect, useRef, useMemo } from "react";
+import { auth } from "../App";
+import "./NewCampaign.css";
+
+const API = import.meta.env.VITE_API_URL || "/api";
+
+/* --- Professional SVG Icons --- */
+const Icons = {
+  Details: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+  ),
+  Sender: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+  ),
+  Template: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+  ),
+  Upload: () => (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="upload-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+  ),
+  Warn: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+  )
+};
+
+export default function NewCampaign({ user, setPage }) {
+  const [form, setForm] = useState({
+    campaign_name: "",
+    subject:       "Quick idea for {company}",
+    body:          `Hi {name},\n\nI build web apps and APIs for startups — recently helped a similar company cut their dev costs by 40% while shipping faster.\n\nHad a quick idea for {company} that might be worth 10 minutes of your time.\n\nWorth a chat?\n\nRoshaan Ali\nFull Stack Engineer\n+92 302 4917779\n\n---\nTo unsubscribe, reply with "unsubscribe".`,
+    sender_name:   "",
+    sender_email:  "",
+    delay_seconds: 10,
+    daily_limit:   20,
+    sheet_name:    "Email Campaign Log",
+    footer_logo_url:    "",
+    footer_tagline:     "",
+    footer_address:     "",
+    footer_links:       "",
+    footer_unsubscribe: 'To unsubscribe, reply with "unsubscribe".',
+  });
+  
+  const [file, setFile]             = useState(null);
+  const [campaignId, setCampaignId] = useState(null);
+  const [status, setStatus]       = useState(null);
+  const [error, setError]         = useState("");
+  const [loading, setLoading]     = useState(false);
+  const [senderReady, setSenderReady] = useState(true);
+  const [quota, setQuota] = useState(null);
+
+  // Footer links as editable rows; serialized to "Label|URL, ..." on send.
+  const [links, setLinks] = useState([{ label: "", url: "" }]);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [logoMsg, setLogoMsg] = useState("");
+  const linksString = useMemo(
+    () => links
+      .filter(l => (l.url || "").trim())
+      .map(l => `${(l.label || "").trim()}|${l.url.trim()}`)
+      .join(", "),
+    [links]
+  );
+
+  const addLink = () => setLinks(ls => [...ls, { label: "", url: "" }]);
+  const removeLink = (i) => setLinks(ls => ls.length > 1 ? ls.filter((_, idx) => idx !== i) : [{ label: "", url: "" }]);
+  const updateLink = (i, k, v) => setLinks(ls => ls.map((l, idx) => idx === i ? { ...l, [k]: v } : l));
+
+  const uploadLogo = async (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setLogoMsg(""); setUploadingLogo(true);
+    try {
+      const token = await auth.currentUser.getIdToken();
+      const fd = new FormData();
+      fd.append("file", f);
+      const res = await fetch(`${API}/v1/images`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Upload failed");
+      update("footer_logo_url", data.url);
+      setLogoMsg("✓ Image uploaded.");
+    } catch (err) {
+      setLogoMsg("Failed: " + err.message);
+    }
+    setUploadingLogo(false);
+  };
+
+  useEffect(() => {
+    checkQuota();
+  }, []);
+
+  const checkQuota = async () => {
+    try {
+      const token = await auth.currentUser.getIdToken();
+      const res   = await fetch(`${API}/v1/quota`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setQuota(data);
+        setSenderReady(data.sender_ready);
+      }
+    } catch (e) {
+      console.error("Quota check failed");
+    }
+  };
+
+  const update = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  // Escape user text for safe rendering inside the preview HTML.
+  const esc = (s) => (s || "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+  // A live HTML preview mirroring the backend's render_email_html(). Placeholders
+  // are shown with sample values so you see roughly what a recipient gets.
+  const previewHtml = useMemo(() => {
+    const sample = (s) => (s || "").replace(/\{name\}/g, "Alex").replace(/\{company\}/g, "Acme Inc");
+    const bodyHtml = esc(sample(form.body)).replace(/\n/g, "<br>");
+
+    const logo = (form.footer_logo_url || "").trim();
+    const logoHtml = logo
+      ? `<img src="${esc(logo)}" alt="" width="140" style="max-width:140px;height:auto;display:block;margin:0 auto 12px;border:0;" />`
+      : "";
+    const tagline = (form.footer_tagline || "").trim();
+    const taglineHtml = tagline
+      ? `<div style="font-size:14px;color:#374151;font-weight:600;margin-bottom:6px;">${esc(tagline)}</div>` : "";
+    const linksHtml = (linksString || "").split(",").map(c => {
+      const t = c.trim(); if (!t) return "";
+      const [label, url] = t.split("|").map(x => (x || "").trim());
+      if (!url) return "";
+      return `<a href="${esc(url)}" style="color:#6366f1;text-decoration:none;margin:0 8px;">${esc(label || url)}</a>`;
+    }).filter(Boolean).join(" · ");
+    const linksRow = linksHtml ? `<div style="margin:10px 0;font-size:13px;">${linksHtml}</div>` : "";
+    const address = (form.footer_address || "").trim();
+    const addressHtml = address
+      ? `<div style="font-size:12px;color:#6b7280;line-height:1.5;margin-top:6px;">${esc(address).replace(/\n/g, "<br>")}</div>` : "";
+    const unsub = (form.footer_unsubscribe || "").trim();
+    const unsubHtml = unsub
+      ? `<div style="font-size:11px;color:#9ca3af;margin-top:12px;">${esc(unsub)}</div>` : "";
+
+    const hasFooter = logo || tagline || linksHtml || address;
+    const footer = hasFooter || unsub
+      ? `<tr><td style="border-top:1px solid #eaeaea;padding:24px 40px;text-align:center;background:#fafafa;">
+           ${logoHtml}${taglineHtml}${linksRow}${addressHtml}${unsubHtml}
+         </td></tr>` : "";
+
+    return `<table role="presentation" width="600" cellpadding="0" cellspacing="0"
+        style="max-width:600px;width:100%;background:#ffffff;border-radius:10px;overflow:hidden;
+               font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0 auto;">
+        <tr><td style="padding:32px 40px;color:#1f2937;font-size:15px;line-height:1.6;">${bodyHtml}</td></tr>
+        ${footer}
+      </table>`;
+  }, [form.body, form.footer_logo_url, form.footer_tagline, linksString, form.footer_address, form.footer_unsubscribe]);
+
+  const handleFile = (e) => {
+    const f = e.target.files[0];
+    if (f) setFile(f);
+  };
+
+  const downloadSampleCsv = (e) => {
+    // Don't trigger the file picker on the wrapping <label>.
+    e.preventDefault();
+    e.stopPropagation();
+    const csv =
+      "name,email,company\n" +
+      "Alice Johnson,alice@example.com,Acme Corp\n" +
+      "Bob Smith,bob@example.com,Globex Inc\n" +
+      "Carla Mendes,carla@example.com,Initech\n";
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "sample_contacts.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const startCampaign = async () => {
+    if (!senderReady)       return setError("Connect your Google account in Settings before sending a campaign.");
+    if (!file)              return setError("Required: Contacts dataset (CSV).");
+    if (!form.campaign_name) return setError("Required: Unique campaign identifier.");
+    if (!form.sender_email) return setError("Required: Verified sender email address.");
+
+    setLoading(true); setError("");
+
+    try {
+      const token   = await auth.currentUser.getIdToken();
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("campaign_name", form.campaign_name);
+      formData.append("subject",       form.subject);
+      formData.append("body",          form.body);
+      formData.append("sender_name",   form.sender_name);
+      formData.append("sender_email",  form.sender_email);
+      formData.append("delay_seconds", form.delay_seconds);
+      formData.append("daily_limit",   form.daily_limit);
+      formData.append("sheet_name",    form.sheet_name);
+      formData.append("footer_logo_url",    form.footer_logo_url);
+      formData.append("footer_tagline",     form.footer_tagline);
+      formData.append("footer_address",     form.footer_address);
+      formData.append("footer_links",       linksString);
+      formData.append("footer_unsubscribe", form.footer_unsubscribe);
+
+      const res  = await fetch(`${API}/campaign/start`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body:    formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Workflow execution failed.");
+
+      setCampaignId(data.campaign_id);
+      pollStatus(data.campaign_id, token);
+
+    } catch (e) {
+      setError(e.message);
+    }
+    setLoading(false);
+  };
+
+  const pollInterval = useRef(null);
+
+  const pollStatus = (id, token) => {
+    if (pollInterval.current) clearInterval(pollInterval.current);
+
+    pollInterval.current = setInterval(async () => {
+      try {
+        const res  = await fetch(`${API}/campaign/${id}/status`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const data = await res.json();
+        setStatus(data);
+        if (data.status === "completed" || data.status?.startsWith("error")) {
+          clearInterval(pollInterval.current);
+          pollInterval.current = null;
+        }
+      } catch (e) {
+        clearInterval(pollInterval.current);
+        pollInterval.current = null;
+      }
+    }, 2000);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (pollInterval.current) clearInterval(pollInterval.current);
+    };
+  }, []);
+
+  const cancelCampaign = async () => {
+    if (!campaignId) return;
+    const token = await auth.currentUser.getIdToken();
+    await fetch(`${API}/campaign/${campaignId}/cancel`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+  };
+
+  const pct = useMemo(() => {
+    if (!status) return 0;
+    return Math.round((status.sent / Math.max(status.total, 1)) * 100);
+  }, [status]);
+
+  return (
+    <div className="campaign-container">
+      <header className="campaign-header">
+        <h1 className="campaign-title">New Campaign</h1>
+        <p className="campaign-subtitle">Build and deploy a personalized email automation workflow.</p>
+      </header>
+
+      {!senderReady && (
+        <div className="warn-alert">
+          <Icons.Warn />
+          <div>
+            <strong>Connect your Google account to send.</strong> Campaigns go out through
+            your own Gmail — head to <a href="/settings" style={{ color: "inherit", textDecoration: "underline" }}>Settings</a> and
+            click <strong>Connect Google Account</strong> first.
+          </div>
+        </div>
+      )}
+      {quota && senderReady && (
+        <div className="warn-alert" style={{ background: "rgba(99,102,241,0.06)", borderColor: "rgba(99,102,241,0.3)", color: "var(--text-secondary)" }}>
+          <Icons.Warn />
+          <div>You have <strong>{quota.remaining}</strong> of {quota.limit} daily sends left.</div>
+        </div>
+      )}
+
+      {/* --- Step 1: Configuration --- */}
+      <section className="form-section">
+        <div className="section-head">
+          <span className="section-icon"><Icons.Details /></span>
+          <span className="section-label">Campaign Identity</span>
+        </div>
+        <div className="form-grid">
+          <div className="form-group form-group-full">
+            <label className="field-label">Identifier / Name</label>
+            <input 
+              className="input-field" 
+              value={form.campaign_name} 
+              onChange={e=>update("campaign_name", e.target.value)} 
+              placeholder="e.g. Q1_Startup_Outreach_2026" 
+            />
+          </div>
+          <div className="form-group">
+            <label className="field-label">Daily Send Limit</label>
+            <input 
+              className="input-field" 
+              type="number" 
+              value={form.daily_limit} 
+              onChange={e=>update("daily_limit", e.target.value)} 
+            />
+          </div>
+          <div className="form-group">
+            <label className="field-label">Interval (Seconds)</label>
+            <input 
+              className="input-field" 
+              type="number" 
+              value={form.delay_seconds} 
+              onChange={e=>update("delay_seconds", e.target.value)} 
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* --- Step 2: Sender --- */}
+      <section className="form-section">
+        <div className="section-head">
+          <span className="section-icon"><Icons.Sender /></span>
+          <span className="section-label">Sender Verification</span>
+        </div>
+        <div className="form-grid">
+          <div className="form-group">
+            <label className="field-label">Friendly Name</label>
+            <input 
+              className="input-field" 
+              value={form.sender_name} 
+              onChange={e=>update("sender_name", e.target.value)} 
+              placeholder="Roshaan Ali" 
+            />
+          </div>
+          <div className="form-group">
+            <label className="field-label">Sender Address</label>
+            <input 
+              className="input-field" 
+              value={form.sender_email} 
+              onChange={e=>update("sender_email", e.target.value)} 
+              placeholder="verified@domain.com" 
+            />
+          </div>
+        </div>
+        <p className="field-hint">Replies go to this address. Emails are delivered via MailFlow.</p>
+      </section>
+
+      {/* --- Step 3: Template --- */}
+      <section className="form-section">
+        <div className="section-head">
+          <span className="section-icon"><Icons.Template /></span>
+          <span className="section-label">Payload Template</span>
+        </div>
+        <div className="form-group" style={{ marginBottom: "1.5rem" }}>
+          <label className="field-label">Subject Vector</label>
+          <input 
+            className="input-field" 
+            value={form.subject} 
+            onChange={e=>update("subject", e.target.value)} 
+          />
+        </div>
+        <div className="form-group">
+          <label className="field-label">Email Payload (Markdown / Plain)</label>
+          <textarea 
+            className="input-field textarea-field" 
+            value={form.body} 
+            onChange={e=>update("body", e.target.value)} 
+          />
+          <p className="field-hint">Dynamic markers from your CSV: {"{name}"}, {"{company}"}</p>
+        </div>
+      </section>
+
+      {/* --- Step 3.5: Email Footer / Template --- */}
+      <section className="form-section">
+        <div className="section-head">
+          <span className="section-icon"><Icons.Template /></span>
+          <span className="section-label">Email Footer &amp; Branding</span>
+        </div>
+        <p className="field-hint" style={{ marginTop: "-0.25rem", marginBottom: "1rem" }}>
+          Fill any field to send a styled HTML email with a footer. Leave all blank to send plain text.
+        </p>
+
+        <div className="form-group">
+          <label className="field-label">Footer logo / banner image</label>
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+            <input
+              className="input-field"
+              style={{ flex: "1 1 240px" }}
+              value={form.footer_logo_url}
+              onChange={e=>update("footer_logo_url", e.target.value)}
+              placeholder="Paste an image URL, or upload →"
+            />
+            <label className="btn-secondary" style={{ cursor: "pointer", whiteSpace: "nowrap", margin: 0 }}>
+              {uploadingLogo ? "Uploading…" : "Upload image"}
+              <input type="file" accept="image/png,image/jpeg,image/gif,image/webp"
+                     onChange={uploadLogo} disabled={uploadingLogo} style={{ display: "none" }} />
+            </label>
+          </div>
+          {form.footer_logo_url && (
+            <div style={{ marginTop: "0.5rem" }}>
+              <img src={form.footer_logo_url} alt="logo preview" style={{ maxHeight: 48, borderRadius: 4 }} />
+            </div>
+          )}
+          {logoMsg && <p className="field-hint" style={{ color: logoMsg.startsWith("✓") ? "#10b981" : "#e07a7a" }}>{logoMsg}</p>}
+          <p className="field-hint">Upload a file (PNG/JPG/GIF/WEBP, max 2 MB) or paste a public image URL.</p>
+        </div>
+
+        <div className="form-group">
+          <label className="field-label">Tagline</label>
+          <input
+            className="input-field"
+            value={form.footer_tagline}
+            onChange={e=>update("footer_tagline", e.target.value)}
+            placeholder="Full Stack Engineer · Building for startups"
+          />
+        </div>
+
+        <div className="form-group">
+          <label className="field-label">Footer links</label>
+          {links.map((l, i) => (
+            <div key={i} style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem", alignItems: "center" }}>
+              <input
+                className="input-field"
+                style={{ flex: "1 1 120px" }}
+                value={l.label}
+                onChange={e=>updateLink(i, "label", e.target.value)}
+                placeholder="Label (e.g. Website)"
+              />
+              <input
+                className="input-field"
+                style={{ flex: "2 1 220px" }}
+                value={l.url}
+                onChange={e=>updateLink(i, "url", e.target.value)}
+                placeholder="https://…"
+              />
+              <button type="button" className="btn-secondary"
+                      style={{ padding: "0 0.75rem", lineHeight: "2.25rem" }}
+                      onClick={()=>removeLink(i)} title="Remove link">✕</button>
+            </div>
+          ))}
+          <button type="button" className="btn-secondary" onClick={addLink} style={{ marginTop: "0.25rem" }}>
+            + Add link
+          </button>
+        </div>
+
+        <div className="form-group">
+          <label className="field-label">Address</label>
+          <input
+            className="input-field"
+            value={form.footer_address}
+            onChange={e=>update("footer_address", e.target.value)}
+            placeholder="123 Startup Street, Lahore, Pakistan"
+          />
+        </div>
+
+        <div className="form-group">
+          <label className="field-label">Unsubscribe line</label>
+          <input
+            className="input-field"
+            value={form.footer_unsubscribe}
+            onChange={e=>update("footer_unsubscribe", e.target.value)}
+          />
+        </div>
+
+        {/* --- Live preview --- */}
+        <div className="form-group">
+          <label className="field-label">Live preview</label>
+          <div
+            style={{ background: "#f4f4f7", padding: "20px", borderRadius: "10px", overflow: "auto" }}
+            dangerouslySetInnerHTML={{ __html: previewHtml }}
+          />
+          <p className="field-hint">Placeholders shown with sample values ({"{name}"} → Alex, {"{company}"} → Acme Inc).</p>
+        </div>
+      </section>
+
+      {/* --- Step 4: Audience --- */}
+      <section className="form-section">
+        <div className="section-head">
+          <span className="section-icon"><Icons.Details /></span>
+          <span className="section-label">Dataset Ingestion</span>
+        </div>
+        <label className="upload-area">
+          <input type="file" accept=".csv" onChange={handleFile} style={{ display:"none" }} />
+          <Icons.Upload />
+          <span className="upload-text">
+            {file ? `✓ ${file.name}` : "Drop contacts.csv or click to browse"}
+          </span>
+          <p className="field-hint">
+            Required headers: <code>name</code>, <code>email</code> · Optional: <code>company</code>
+          </p>
+          <button type="button" className="sample-csv-link" onClick={downloadSampleCsv}>
+            ↓ Download sample CSV
+          </button>
+        </label>
+      </section>
+
+      {error && <div className="error-alert">Error: {error}</div>}
+
+      <div className="action-bar">
+        <button 
+          className="btn-primary" 
+          onClick={startCampaign} 
+          disabled={loading || !senderReady}
+        >
+          {loading ? "Deploying..." : "Launch Campaign"}
+          {!loading && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polyline points="22 2 15 22 11 13 2 9 22 2"/></svg>}
+        </button>
+        {campaignId && status?.status === "running" && (
+          <button className="btn-outline-error" onClick={cancelCampaign}>Terminate</button>
+        )}
+      </div>
+
+      {status && (
+        <div className="execution-progress">
+          <div className="progress-header">
+            <div className="progress-status">
+              {status.status === "completed" ? "All tasks successfully completed" : 
+               status.status === "running" ? "Transmitting payloads..." : 
+               `Status: ${status.status}`}
+            </div>
+            <div className="p-stat-val">{pct}%</div>
+          </div>
+          <div className="progress-track">
+            <div className="progress-fill" style={{ width: `${pct}%` }} />
+          </div>
+          <div className="prog-stats">
+            <div className="p-stat-item">
+              <span className="p-stat-lbl">Sent</span>
+              <span className="p-stat-val">{status.sent}</span>
+            </div>
+            <div className="p-stat-item">
+              <span className="p-stat-lbl">Fail</span>
+              <span className="p-stat-val" style={{ color: status.failed > 0 ? "var(--accent-error)" : "inherit" }}>
+                {status.failed}
+              </span>
+            </div>
+            <div className="p-stat-item">
+              <span className="p-stat-lbl">Total</span>
+              <span className="p-stat-val">{status.total}</span>
+            </div>
+            <div className="p-stat-item">
+              <span className="p-stat-lbl">Avg Delay</span>
+              <span className="p-stat-val">{form.delay_seconds}s</span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+

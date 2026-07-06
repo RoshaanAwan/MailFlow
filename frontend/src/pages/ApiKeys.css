@@ -1,0 +1,192 @@
+.apikeys-container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 1.5rem 0;
+  animation: slideFadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.apikeys-header { margin-bottom: 2.5rem; }
+
+.apikeys-title {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  margin-bottom: 0.5rem;
+}
+
+.apikeys-subtitle {
+  color: var(--text-secondary);
+  font-size: 1rem;
+}
+
+.apikeys-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 1.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.card-icon {
+  display: flex;
+  color: var(--accent-primary);
+}
+
+.card-label {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.create-row {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.key-input {
+  flex: 1;
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  outline: none;
+}
+.key-input:focus { border-color: var(--accent-primary); }
+
+.btn-create {
+  background: var(--accent-primary);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 0.75rem 1.5rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.2s;
+}
+.btn-create:hover { opacity: 0.9; }
+.btn-create:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.fresh-key {
+  margin-top: 1.25rem;
+  padding: 1rem;
+  background: rgba(245, 158, 11, 0.06);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 12px;
+}
+
+.fresh-key-warn {
+  color: var(--accent-warning);
+  font-size: 0.85rem;
+  margin-bottom: 0.75rem;
+}
+
+.fresh-key-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.fresh-key-value {
+  flex: 1;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  background: var(--input-bg);
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  word-break: break-all;
+}
+
+.btn-copy {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  border-radius: 8px;
+  padding: 0.55rem 0.85rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-copy:hover { color: var(--text-primary); border-color: var(--accent-primary); }
+
+.key-list { display: flex; flex-direction: column; gap: 0.75rem; }
+
+.key-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem;
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+}
+.key-item.revoked { opacity: 0.55; }
+
+.key-meta { display: flex; flex-direction: column; gap: 0.25rem; }
+.key-name { font-weight: 600; color: var(--text-primary); font-size: 0.9rem; }
+.key-prefix {
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+.key-dates { font-size: 0.75rem; color: var(--text-muted); }
+
+.btn-revoke {
+  background: transparent;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: var(--accent-error);
+  border-radius: 8px;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.btn-revoke:hover { background: rgba(239, 68, 68, 0.08); }
+
+.key-revoked-tag {
+  font-size: 0.75rem;
+  color: var(--accent-error);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+}
+
+.empty-keys, .loading-state {
+  text-align: center;
+  padding: 2.5rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.code-block {
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 1.25rem;
+  color: var(--text-secondary);
+  font-family: ui-monospace, monospace;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.msg-err {
+  margin-top: 1rem;
+  color: var(--accent-error);
+  font-size: 0.85rem;
+}

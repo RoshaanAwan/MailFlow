@@ -1,0 +1,92 @@
+.activity-container {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 1.5rem 0;
+  animation: slideFadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.activity-header { margin-bottom: 2rem; }
+
+.activity-title {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  margin-bottom: 0.5rem;
+}
+
+.activity-subtitle {
+  color: var(--text-secondary);
+  font-size: 1rem;
+}
+
+.activity-empty {
+  text-align: center;
+  padding: 4rem 2rem;
+  color: var(--text-muted);
+  background: var(--bg-secondary);
+  border: 1px dashed var(--border-color);
+  border-radius: 16px;
+  font-size: 0.9rem;
+}
+.activity-empty code {
+  font-family: ui-monospace, monospace;
+  color: var(--text-secondary);
+}
+
+.activity-table-wrap {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.activity-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.activity-table th {
+  text-align: left;
+  padding: 0.9rem 1.25rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.activity-table td {
+  padding: 0.9rem 1.25rem;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+  vertical-align: top;
+}
+.activity-table tr:last-child td { border-bottom: none; }
+
+.cell-time { color: var(--text-muted); white-space: nowrap; }
+.cell-subject, .cell-detail {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-pill {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.status-pill.ok {
+  color: var(--accent-success);
+  background: rgba(16, 185, 129, 0.1);
+}
+.status-pill.fail {
+  color: var(--accent-error);
+  background: rgba(239, 68, 68, 0.1);
+}

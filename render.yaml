@@ -1,0 +1,32 @@
+# Render Blueprint for the MailFlow FastAPI backend.
+# In Render: New + -> Blueprint -> pick this repo. Render reads this file and
+# creates the service below. Set the secret env vars (marked sync:false) in the
+# dashboard after the service is created. See docs/DEPLOY.md for the full guide.
+services:
+  - type: web
+    name: mailflow-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      # --- Secrets / per-deploy values: set these in the Render dashboard ---
+      - key: DATABASE_URL          # Neon Postgres connection string
+        sync: false
+      - key: JWT_SECRET            # openssl rand -hex 32
+        sync: false
+      - key: ENCRYPTION_KEY        # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+        sync: false
+      - key: CORS_ORIGINS          # your Vercel URL, e.g. https://mailflow.vercel.app
+        sync: false
+      - key: FRONTEND_URL          # same Vercel URL (used in email links)
+        sync: false
+      # --- Optional: system mailer for verification / password-reset emails ---
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
