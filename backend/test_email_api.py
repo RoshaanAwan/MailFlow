@@ -22,10 +22,12 @@ from fastapi.testclient import TestClient
 import main
 
 SEED_EMAIL = "key-owner@example.com"
+VERIFIED_DOMAIN = "verified.example.com"
+SENDER = f"hi@{VERIFIED_DOMAIN}"
 
 
 class FakeProvider:
-    """Stand-in for SmtpProvider: records the last send instead of sending."""
+    """Stand-in for the send provider: records the last send instead of sending."""
     last_send = None
     username = SEED_EMAIL
 
@@ -35,9 +37,15 @@ class FakeProvider:
 
 
 async def _seed_verified_user():
+<<<<<<< HEAD
     """Create a real, email-verified user with a connected Google account; return uid."""
     from db import SessionLocal
     from models import User, GoogleAccount
+=======
+    """Create an email-verified user with one verified sending domain; return uid."""
+    from db import SessionLocal
+    from models import User, Domain
+>>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
     from auth import hash_password
     import crypto
 
@@ -46,11 +54,17 @@ async def _seed_verified_user():
         s.add(u)
         await s.commit()
         await s.refresh(u)
+<<<<<<< HEAD
         s.add(GoogleAccount(
             user_id=u.id,
             google_email=SEED_EMAIL,
             refresh_token_encrypted=crypto.encrypt("fake-refresh-token"),
             from_name="",
+=======
+        s.add(Domain(
+            user_id=u.id, name=VERIFIED_DOMAIN, resend_id="rs_test",
+            status="verified", records_json="[]",
+>>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
         ))
         await s.commit()
         return str(u.id)
@@ -107,35 +121,45 @@ def test_list_keys_never_exposes_raw_key(client):
 
 # ---------------------------------------------------------------- sending email
 
-def test_send_with_valid_key_succeeds(client, api_key):
+def test_send_from_verified_domain_succeeds(client, api_key):
     res = client.post(
         "/v1/mail/send",
         headers={"Authorization": f"Bearer {api_key}"},
-        json={"to": "rcpt@example.com", "subject": "Hi", "html": "<b>Hello</b>"},
+        json={"from": SENDER, "to": "rcpt@example.com", "subject": "Hi", "html": "<b>Hello</b>"},
     )
-    assert res.status_code == 200
+    assert res.status_code == 200, res.text
     body = res.json()
     assert body["status"] == "sent"
     assert body["message_id"] == "fake-message-id-001"
-    # The provider actually received our content.
+    # The provider sent FROM the user's own verified-domain address.
+    assert FakeProvider.last_send["from_email"] == SENDER
     assert FakeProvider.last_send["to_email"] == "rcpt@example.com"
     assert FakeProvider.last_send["html"] == "<b>Hello</b>"
 
 
-def test_send_defaults_from_to_connected_account(client, api_key):
-    client.post(
+def test_send_requires_from(client, api_key):
+    res = client.post(
         "/v1/mail/send",
         headers={"Authorization": f"Bearer {api_key}"},
         json={"to": "rcpt@example.com", "subject": "Hi", "text": "x"},
     )
-    assert FakeProvider.last_send["from_email"] == SEED_EMAIL
+    assert res.status_code == 422  # 'from' is required
+
+
+def test_send_rejects_unverified_domain(client, api_key):
+    res = client.post(
+        "/v1/mail/send",
+        headers={"Authorization": f"Bearer {api_key}"},
+        json={"from": "hi@notmine.com", "to": "rcpt@example.com", "subject": "Hi", "text": "x"},
+    )
+    assert res.status_code == 403  # domain not verified for this user
 
 
 def test_send_requires_text_or_html(client, api_key):
     res = client.post(
         "/v1/mail/send",
         headers={"Authorization": f"Bearer {api_key}"},
-        json={"to": "rcpt@example.com", "subject": "Hi"},
+        json={"from": SENDER, "to": "rcpt@example.com", "subject": "Hi"},
     )
     assert res.status_code == 422
 
@@ -144,7 +168,7 @@ def test_send_validates_email_address(client, api_key):
     res = client.post(
         "/v1/mail/send",
         headers={"Authorization": f"Bearer {api_key}"},
-        json={"to": "not-an-email", "subject": "Hi", "text": "x"},
+        json={"from": SENDER, "to": "not-an-email", "subject": "Hi", "text": "x"},
     )
     assert res.status_code == 422  # EmailStr rejects it
 
@@ -187,7 +211,7 @@ def test_revoked_key_cannot_send(client):
     ok = client.post(
         "/v1/mail/send",
         headers={"Authorization": f"Bearer {key}"},
-        json={"to": "rcpt@example.com", "subject": "Hi", "text": "x"},
+        json={"from": SENDER, "to": "rcpt@example.com", "subject": "Hi", "text": "x"},
     )
     assert ok.status_code == 200
 
@@ -198,7 +222,7 @@ def test_revoked_key_cannot_send(client):
     blocked = client.post(
         "/v1/mail/send",
         headers={"Authorization": f"Bearer {key}"},
-        json={"to": "rcpt@example.com", "subject": "Hi", "text": "x"},
+        json={"from": SENDER, "to": "rcpt@example.com", "subject": "Hi", "text": "x"},
     )
     assert blocked.status_code == 401
 
@@ -209,7 +233,7 @@ def test_activity_log_records_sent_email(client, api_key):
     client.post(
         "/v1/mail/send",
         headers={"Authorization": f"Bearer {api_key}"},
-        json={"to": "logged@example.com", "subject": "Logged", "text": "x"},
+        json={"from": SENDER, "to": "logged@example.com", "subject": "Logged", "text": "x"},
     )
     res = client.get("/v1/logs")
     assert res.status_code == 200
@@ -232,7 +256,7 @@ def test_daily_send_limit_returns_429(client, api_key):
         res = client.post(
             "/v1/mail/send",
             headers={"Authorization": f"Bearer {api_key}"},
-            json={"to": "blocked@example.com", "subject": "Hi", "text": "x"},
+            json={"from": SENDER, "to": "blocked@example.com", "subject": "Hi", "text": "x"},
         )
         assert res.status_code == 429
     finally:

@@ -25,20 +25,37 @@ _load_dotenv()
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
+<<<<<<< HEAD
 # Browser origins allowed to call this API (CORS). Comma-separated list of your
 # deployed frontend URL(s); FRONTEND_URL is always included. Empty -> permissive
 # "*" fallback (dev only); see main.py.
+=======
+# Browser origins allowed to call this API (CORS). Set CORS_ORIGINS to a
+# comma-separated list of your deployed frontend URL(s), e.g.
+#   CORS_ORIGINS=https://mailflow.vercel.app,https://www.yourdomain.com
+# FRONTEND_URL is always included. When this list is empty the API falls back to
+# a permissive "*" (dev only); see main.py.
+>>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
 def _parse_origins() -> list[str]:
     raw = os.getenv("CORS_ORIGINS", "")
     origins = [o.strip().rstrip("/") for o in raw.split(",") if o.strip()]
     fe = FRONTEND_URL.strip().rstrip("/")
+<<<<<<< HEAD
     if fe and (origins or fe != "http://localhost:3000") and fe not in origins:
         origins.append(fe)
+=======
+    # Only treat FRONTEND_URL as an allowed origin when it's a real deployed URL
+    # (i.e. CORS_ORIGINS was set or FRONTEND_URL isn't the localhost default).
+    if fe and (origins or fe != "http://localhost:3000"):
+        if fe not in origins:
+            origins.append(fe)
+>>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
     return origins
 
 
 CORS_ORIGINS = _parse_origins()
 
+<<<<<<< HEAD
 # Google OAuth — lets each user connect their own Gmail account so MailFlow sends
 # email through it (via the Gmail API). Create an OAuth client (Web application)
 # in Google Cloud Console, add GOOGLE_REDIRECT_URI to its authorized redirect
@@ -54,6 +71,8 @@ def google_oauth_configured() -> bool:
     return bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
 
 
+=======
+>>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
 # Database. Defaults to a local SQLite file so the app runs with zero setup.
 # In production set DATABASE_URL to a Postgres connection string, e.g. from Neon:
 #   postgresql://user:pass@host/dbname
@@ -83,9 +102,26 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM = os.getenv("SMTP_FROM", "") or SMTP_USER
 SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "MailFlow")
 
+# Resend (https://resend.com) — preferred delivery backend when configured.
+# RESEND_FROM must be an address on a domain you've verified in Resend (SPF/DKIM),
+# e.g. "MailFlow <hi@yourdomain.com>". For quick testing without a verified domain,
+# Resend allows "onboarding@resend.dev" (delivers only to your own account email).
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+RESEND_FROM = os.getenv("RESEND_FROM", "onboarding@resend.dev")
+RESEND_FROM_NAME = os.getenv("RESEND_FROM_NAME", "MailFlow")
+
 
 def smtp_configured() -> bool:
     return bool(SMTP_USER and SMTP_PASSWORD)
+
+
+def resend_configured() -> bool:
+    return bool(RESEND_API_KEY)
+
+
+def sender_configured() -> bool:
+    """True if any delivery backend (Resend or shared SMTP) is available."""
+    return resend_configured() or smtp_configured()
 
 
 # Send quotas for the shared sender. One Gmail allows ~500/day total, so cap

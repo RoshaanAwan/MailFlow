@@ -21,8 +21,14 @@ from config import DATABASE_URL
 BACKEND_DIR = Path(__file__).resolve().parent
 _SQLITE_FALLBACK = f"sqlite+aiosqlite:///{BACKEND_DIR / 'mailflow.db'}"
 
+<<<<<<< HEAD
 # libpq/psql query params asyncpg does NOT accept as kwargs (Neon/Supabase append
 # these). We strip them and translate SSL intent into connect_args instead.
+=======
+# libpq/psql query params that asyncpg does NOT accept as keyword args. Providers
+# like Neon/Supabase append these to their connection strings; we strip them and
+# translate SSL intent into asyncpg's connect_args instead.
+>>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
 _LIBPQ_ONLY_PARAMS = {"sslmode", "channel_binding", "gssencmode", "target_session_attrs"}
 
 
@@ -41,11 +47,19 @@ def _normalize_async_url(url: str) -> tuple[str, dict]:
             url = url.replace("sqlite://", "sqlite+aiosqlite://", 1)
         return url, {}
 
+<<<<<<< HEAD
+=======
+    # Normalize the scheme to the asyncpg driver.
+>>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
     if url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql+asyncpg://", 1)
     elif url.startswith("postgresql://"):
         url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
+<<<<<<< HEAD
+=======
+    # Split off the query string, drop libpq-only params, and decide on SSL.
+>>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
     parts = urlsplit(url)
     kept, want_ssl = [], False
     for key, val in parse_qsl(parts.query, keep_blank_values=True):
@@ -56,7 +70,12 @@ def _normalize_async_url(url: str) -> tuple[str, dict]:
         kept.append((key, val))
 
     cleaned = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(kept), parts.fragment))
+<<<<<<< HEAD
     return cleaned, ({"ssl": True} if want_ssl else {})
+=======
+    connect_args = {"ssl": True} if want_ssl else {}
+    return cleaned, connect_args
+>>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
 
 
 ASYNC_DATABASE_URL, _CONNECT_ARGS = _normalize_async_url(DATABASE_URL)

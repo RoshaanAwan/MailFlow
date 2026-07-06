@@ -6,6 +6,8 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import NewCampaign from "./pages/NewCampaign";
 import ApiKeys from "./pages/ApiKeys";
+import Domains from "./pages/Domains";
+import Smtp from "./pages/Smtp";
 import Activity from "./pages/Activity";
 import Settings from "./pages/Settings";
 import ResetPassword from "./pages/ResetPassword";
@@ -50,6 +52,8 @@ function AppShell() {
   let page = "dashboard";
   if (location.pathname === "/campaign") page = "new-campaign";
   if (location.pathname === "/api-keys") page = "api-keys";
+  if (location.pathname === "/domains") page = "domains";
+  if (location.pathname === "/smtp") page = "smtp";
   if (location.pathname === "/activity") page = "activity";
   if (location.pathname === "/settings") page = "settings";
 
@@ -58,6 +62,8 @@ function AppShell() {
     if (targetPage === "dashboard") navigate("/dashboard");
     if (targetPage === "new-campaign") navigate("/campaign");
     if (targetPage === "api-keys") navigate("/api-keys");
+    if (targetPage === "domains") navigate("/domains");
+    if (targetPage === "smtp") navigate("/smtp");
     if (targetPage === "activity") navigate("/activity");
     if (targetPage === "settings") navigate("/settings");
   };
@@ -70,6 +76,8 @@ function AppShell() {
           <Route path="/dashboard" element={<Dashboard user={user} />} />
           <Route path="/campaign" element={<NewCampaign user={user} setPage={handleNavigation} />} />
           <Route path="/api-keys" element={<ApiKeys />} />
+          <Route path="/domains" element={<Domains />} />
+          <Route path="/smtp" element={<Smtp />} />
           <Route path="/activity" element={<Activity />} />
           <Route path="/settings" element={<Settings user={user} />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />

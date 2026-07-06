@@ -161,12 +161,14 @@ export default function ApiKeys() {
           <span className="card-label">Send your first email</span>
         </div>
         <p className="apikeys-subtitle" style={{ fontSize: "0.875rem", marginBottom: "1rem" }}>
-          Sending works out of the box — just verify your email, then call:
+          First verify a domain on the <strong>Domains</strong> page, then send from any
+          address on it:
         </p>
         <pre className="code-block">{`curl -X POST ${API}/v1/mail/send \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
+    "from": "hi@yourdomain.com",
     "to": "recipient@example.com",
     "subject": "Hello from MailFlow",
     "html": "<h1>It works!</h1>"
