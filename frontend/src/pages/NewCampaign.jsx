@@ -89,7 +89,7 @@ export default function NewCampaign({ user, setPage }) {
   };
 
   const startCampaign = async () => {
-    if (!senderReady)       return setError("Sending is temporarily unavailable. Please try again later.");
+    if (!senderReady)       return setError("Connect your Google account in Settings before sending a campaign.");
     if (!file)              return setError("Required: Contacts dataset (CSV).");
     if (!form.campaign_name) return setError("Required: Unique campaign identifier.");
     if (!form.sender_email) return setError("Required: Verified sender email address.");
@@ -181,7 +181,9 @@ export default function NewCampaign({ user, setPage }) {
         <div className="warn-alert">
           <Icons.Warn />
           <div>
-            <strong>Sending is temporarily unavailable.</strong> The delivery service isn't configured yet.
+            <strong>Connect your Google account to send.</strong> Campaigns go out through
+            your own Gmail — head to <a href="/settings" style={{ color: "inherit", textDecoration: "underline" }}>Settings</a> and
+            click <strong>Connect Google Account</strong> first.
           </div>
         </div>
       )}

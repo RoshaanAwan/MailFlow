@@ -297,11 +297,17 @@ def send_campaign_task(campaign_id: str, contacts: list, config: CampaignRequest
 async def get_quota(user=Depends(get_current_user), session: AsyncSession = Depends(get_session)):
     """How many emails this user has sent today vs their daily limit."""
     used = await _sent_today(session, user["uid"])
+    # A user can run a campaign if they can send *some* way: their own connected
+    # Gmail (the primary path) or a shared sender (Resend/SMTP) configured on the
+    # server. Campaigns send via Gmail, so a connected account is what matters.
+    gmail_connected = (
+        await session.execute(select(GoogleAccount).where(GoogleAccount.user_id == int(user["uid"])))
+    ).scalar_one_or_none() is not None
     return {
         "used": used,
         "limit": PER_USER_DAILY_LIMIT,
         "remaining": max(0, PER_USER_DAILY_LIMIT - used),
-        "sender_ready": sender_configured(),
+        "sender_ready": gmail_connected or sender_configured(),
     }
 
 # ============================================================
