@@ -55,6 +55,25 @@ class Domain(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class SmtpCredential(Base):
+    """A customer's own SMTP server credentials (BYO-SMTP).
+
+    Lets a user send through their own mail server instead of the shared account
+    or Gmail. The password is encrypted at rest (see crypto.py). One per user.
+    """
+
+    __tablename__ = "smtp_credentials"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, index=True, nullable=False)
+    host: Mapped[str] = mapped_column(String(255), nullable=False)
+    port: Mapped[int] = mapped_column(Integer, nullable=False, default=587)
+    username: Mapped[str] = mapped_column(String(320), nullable=False)  # doubles as the From address
+    password_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    from_name: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class AuthToken(Base):
     """Single-use, time-limited tokens for email verification & password reset.
 

@@ -2,26 +2,13 @@
 # HF Spaces send traffic to port 7860, so the app listens there.
 FROM python:3.11-slim
 
-<<<<<<< HEAD
-=======
 # Faster, cleaner Python in containers.
->>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
 
-<<<<<<< HEAD
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-ENV PORT=7860
-EXPOSE 7860
-
-=======
 # Install deps first (better layer caching).
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
@@ -34,5 +21,4 @@ ENV PORT=7860
 EXPOSE 7860
 
 # Start the API. Honors $PORT (defaults to 7860).
->>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-7860}"]

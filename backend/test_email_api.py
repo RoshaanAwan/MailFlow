@@ -37,15 +37,9 @@ class FakeProvider:
 
 
 async def _seed_verified_user():
-<<<<<<< HEAD
     """Create a real, email-verified user with a connected Google account; return uid."""
     from db import SessionLocal
     from models import User, GoogleAccount
-=======
-    """Create an email-verified user with one verified sending domain; return uid."""
-    from db import SessionLocal
-    from models import User, Domain
->>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
     from auth import hash_password
     import crypto
 
@@ -54,17 +48,11 @@ async def _seed_verified_user():
         s.add(u)
         await s.commit()
         await s.refresh(u)
-<<<<<<< HEAD
         s.add(GoogleAccount(
             user_id=u.id,
             google_email=SEED_EMAIL,
             refresh_token_encrypted=crypto.encrypt("fake-refresh-token"),
             from_name="",
-=======
-        s.add(Domain(
-            user_id=u.id, name=VERIFIED_DOMAIN, resend_id="rs_test",
-            status="verified", records_json="[]",
->>>>>>> ad3a596b465096fa9037e43daebb53d1bd012960
         ))
         await s.commit()
         return str(u.id)
@@ -79,6 +67,9 @@ def client():
     # Override auth -> the seeded verified user (bypasses JWT verification).
     main.app.dependency_overrides[main.get_current_user] = lambda: fake_user
     # Override the per-user Gmail provider -> fake (no real Gmail API call).
+    # Stash the original so teardown restores it — otherwise this monkeypatch
+    # leaks into other test modules that rely on the real (DB-backed) lookup.
+    _real_get_gmail = main.get_user_gmail_provider
     async def _fake_gmail(session, uid):
         return FakeProvider()
     main.get_user_gmail_provider = _fake_gmail
@@ -86,6 +77,7 @@ def client():
     with TestClient(main.app) as c:
         yield c
 
+    main.get_user_gmail_provider = _real_get_gmail
     main.app.dependency_overrides.clear()
 
 
@@ -137,22 +129,29 @@ def test_send_from_verified_domain_succeeds(client, api_key):
     assert FakeProvider.last_send["html"] == "<b>Hello</b>"
 
 
-def test_send_requires_from(client, api_key):
+def test_send_without_from_defaults_to_gmail_address(client, api_key):
+    # With a connected Gmail account, 'from' is optional: the email goes out AS the
+    # connected Gmail address (the seeded user's own address).
     res = client.post(
         "/v1/mail/send",
         headers={"Authorization": f"Bearer {api_key}"},
         json={"to": "rcpt@example.com", "subject": "Hi", "text": "x"},
     )
-    assert res.status_code == 422  # 'from' is required
+    assert res.status_code == 200, res.text
+    assert res.json()["status"] == "sent"
+    assert FakeProvider.last_send["from_email"] == SEED_EMAIL
 
 
-def test_send_rejects_unverified_domain(client, api_key):
+def test_send_allows_any_from_with_gmail(client, api_key):
+    # Gmail sends AS the connected account regardless of the requested 'from', so
+    # there's no verified-domain gate on the Gmail path.
     res = client.post(
         "/v1/mail/send",
         headers={"Authorization": f"Bearer {api_key}"},
         json={"from": "hi@notmine.com", "to": "rcpt@example.com", "subject": "Hi", "text": "x"},
     )
-    assert res.status_code == 403  # domain not verified for this user
+    assert res.status_code == 200, res.text
+    assert res.json()["status"] == "sent"
 
 
 def test_send_requires_text_or_html(client, api_key):
