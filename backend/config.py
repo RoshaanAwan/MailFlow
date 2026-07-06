@@ -59,6 +59,24 @@ def google_oauth_configured() -> bool:
     return bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
 
 
+# Public origin of THIS backend (scheme + host, no trailing slash), used to build
+# absolute URLs for uploaded images so external email clients can load them.
+# Prefer an explicit BACKEND_URL; otherwise derive it from GOOGLE_REDIRECT_URI
+# (which already points at this backend); fall back to localhost for dev.
+def backend_base_url() -> str:
+    explicit = os.getenv("BACKEND_URL", "").strip().rstrip("/")
+    if explicit:
+        return explicit
+    try:
+        from urllib.parse import urlsplit
+        parts = urlsplit(GOOGLE_REDIRECT_URI)
+        if parts.scheme and parts.netloc:
+            return f"{parts.scheme}://{parts.netloc}"
+    except Exception:
+        pass
+    return "http://localhost:8000"
+
+
 # Database. Defaults to a local SQLite file so the app runs with zero setup.
 # In production set DATABASE_URL to a Postgres connection string, e.g. from Neon:
 #   postgresql://user:pass@host/dbname

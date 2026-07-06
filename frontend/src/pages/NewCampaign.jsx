@@ -48,6 +48,45 @@ export default function NewCampaign({ user, setPage }) {
   const [senderReady, setSenderReady] = useState(true);
   const [quota, setQuota] = useState(null);
 
+  // Footer links as editable rows; serialized to "Label|URL, ..." on send.
+  const [links, setLinks] = useState([{ label: "", url: "" }]);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [logoMsg, setLogoMsg] = useState("");
+  const linksString = useMemo(
+    () => links
+      .filter(l => (l.url || "").trim())
+      .map(l => `${(l.label || "").trim()}|${l.url.trim()}`)
+      .join(", "),
+    [links]
+  );
+
+  const addLink = () => setLinks(ls => [...ls, { label: "", url: "" }]);
+  const removeLink = (i) => setLinks(ls => ls.length > 1 ? ls.filter((_, idx) => idx !== i) : [{ label: "", url: "" }]);
+  const updateLink = (i, k, v) => setLinks(ls => ls.map((l, idx) => idx === i ? { ...l, [k]: v } : l));
+
+  const uploadLogo = async (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setLogoMsg(""); setUploadingLogo(true);
+    try {
+      const token = await auth.currentUser.getIdToken();
+      const fd = new FormData();
+      fd.append("file", f);
+      const res = await fetch(`${API}/v1/images`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Upload failed");
+      update("footer_logo_url", data.url);
+      setLogoMsg("✓ Image uploaded.");
+    } catch (err) {
+      setLogoMsg("Failed: " + err.message);
+    }
+    setUploadingLogo(false);
+  };
+
   useEffect(() => {
     checkQuota();
   }, []);
@@ -87,7 +126,7 @@ export default function NewCampaign({ user, setPage }) {
     const tagline = (form.footer_tagline || "").trim();
     const taglineHtml = tagline
       ? `<div style="font-size:14px;color:#374151;font-weight:600;margin-bottom:6px;">${esc(tagline)}</div>` : "";
-    const linksHtml = (form.footer_links || "").split(",").map(c => {
+    const linksHtml = (linksString || "").split(",").map(c => {
       const t = c.trim(); if (!t) return "";
       const [label, url] = t.split("|").map(x => (x || "").trim());
       if (!url) return "";
@@ -113,7 +152,7 @@ export default function NewCampaign({ user, setPage }) {
         <tr><td style="padding:32px 40px;color:#1f2937;font-size:15px;line-height:1.6;">${bodyHtml}</td></tr>
         ${footer}
       </table>`;
-  }, [form.body, form.footer_logo_url, form.footer_tagline, form.footer_links, form.footer_address, form.footer_unsubscribe]);
+  }, [form.body, form.footer_logo_url, form.footer_tagline, linksString, form.footer_address, form.footer_unsubscribe]);
 
   const handleFile = (e) => {
     const f = e.target.files[0];
@@ -161,7 +200,7 @@ export default function NewCampaign({ user, setPage }) {
       formData.append("footer_logo_url",    form.footer_logo_url);
       formData.append("footer_tagline",     form.footer_tagline);
       formData.append("footer_address",     form.footer_address);
-      formData.append("footer_links",       form.footer_links);
+      formData.append("footer_links",       linksString);
       formData.append("footer_unsubscribe", form.footer_unsubscribe);
 
       const res  = await fetch(`${API}/campaign/start`, {
@@ -351,14 +390,28 @@ export default function NewCampaign({ user, setPage }) {
         </p>
 
         <div className="form-group">
-          <label className="field-label">Footer logo / banner image URL</label>
-          <input
-            className="input-field"
-            value={form.footer_logo_url}
-            onChange={e=>update("footer_logo_url", e.target.value)}
-            placeholder="https://yoursite.com/logo.png"
-          />
-          <p className="field-hint">Must be a public image URL (hosted online), not a local file.</p>
+          <label className="field-label">Footer logo / banner image</label>
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+            <input
+              className="input-field"
+              style={{ flex: "1 1 240px" }}
+              value={form.footer_logo_url}
+              onChange={e=>update("footer_logo_url", e.target.value)}
+              placeholder="Paste an image URL, or upload →"
+            />
+            <label className="btn-secondary" style={{ cursor: "pointer", whiteSpace: "nowrap", margin: 0 }}>
+              {uploadingLogo ? "Uploading…" : "Upload image"}
+              <input type="file" accept="image/png,image/jpeg,image/gif,image/webp"
+                     onChange={uploadLogo} disabled={uploadingLogo} style={{ display: "none" }} />
+            </label>
+          </div>
+          {form.footer_logo_url && (
+            <div style={{ marginTop: "0.5rem" }}>
+              <img src={form.footer_logo_url} alt="logo preview" style={{ maxHeight: 48, borderRadius: 4 }} />
+            </div>
+          )}
+          {logoMsg && <p className="field-hint" style={{ color: logoMsg.startsWith("✓") ? "#10b981" : "#e07a7a" }}>{logoMsg}</p>}
+          <p className="field-hint">Upload a file (PNG/JPG/GIF/WEBP, max 2 MB) or paste a public image URL.</p>
         </div>
 
         <div className="form-group">
@@ -373,13 +426,30 @@ export default function NewCampaign({ user, setPage }) {
 
         <div className="form-group">
           <label className="field-label">Footer links</label>
-          <input
-            className="input-field"
-            value={form.footer_links}
-            onChange={e=>update("footer_links", e.target.value)}
-            placeholder="Website|https://mysite.com, LinkedIn|https://linkedin.com/in/me"
-          />
-          <p className="field-hint">Format: <code>Label|https://url</code>, separated by commas.</p>
+          {links.map((l, i) => (
+            <div key={i} style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem", alignItems: "center" }}>
+              <input
+                className="input-field"
+                style={{ flex: "1 1 120px" }}
+                value={l.label}
+                onChange={e=>updateLink(i, "label", e.target.value)}
+                placeholder="Label (e.g. Website)"
+              />
+              <input
+                className="input-field"
+                style={{ flex: "2 1 220px" }}
+                value={l.url}
+                onChange={e=>updateLink(i, "url", e.target.value)}
+                placeholder="https://…"
+              />
+              <button type="button" className="btn-secondary"
+                      style={{ padding: "0 0.75rem", lineHeight: "2.25rem" }}
+                      onClick={()=>removeLink(i)} title="Remove link">✕</button>
+            </div>
+          ))}
+          <button type="button" className="btn-secondary" onClick={addLink} style={{ marginTop: "0.25rem" }}>
+            + Add link
+          </button>
         </div>
 
         <div className="form-group">

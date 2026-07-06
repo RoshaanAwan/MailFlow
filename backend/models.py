@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from db import Base
@@ -71,6 +71,22 @@ class SmtpCredential(Base):
     username: Mapped[str] = mapped_column(String(320), nullable=False)  # doubles as the From address
     password_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
     from_name: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Image(Base):
+    """An uploaded image (e.g. an email footer logo), stored in the DB so it
+    survives restarts and can be served from a stable public URL. Keep uploads
+    small (logos/banners) — the bytes live in Postgres, not object storage.
+    """
+
+    __tablename__ = "images"
+
+    # Short random hex id used in the public URL (/v1/images/{id}).
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False, default="image/png")
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

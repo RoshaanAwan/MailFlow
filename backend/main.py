@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, BackgroundTasks, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List
 import pandas as pd
@@ -34,6 +34,7 @@ from config import (
     GOOGLE_CLIENT_SECRET,
     GOOGLE_REDIRECT_URI,
     PER_USER_DAILY_LIMIT,
+    backend_base_url,
     get_config_status,
     google_oauth_configured,
     log_startup_config,
@@ -49,7 +50,7 @@ from providers import (
     ProviderError,
 )
 from db import get_session, init_db
-from models import ApiKey, EmailLog, User, GoogleAccount, Domain, SmtpCredential
+from models import ApiKey, EmailLog, User, GoogleAccount, Domain, SmtpCredential, Image
 import crypto
 import resend_domains
 from api_keys import generate_api_key, get_api_key_user
@@ -798,6 +799,63 @@ def _serialize_key(k: ApiKey) -> dict:
         "created_at": k.created_at.isoformat() if k.created_at else None,
         "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None,
     }
+
+# ============================================================
+#  IMAGE UPLOADS (footer logos — stored in DB, served by URL)
+# ============================================================
+
+_ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+_MAX_IMAGE_BYTES = 2 * 1024 * 1024  # 2 MB — these are logos/banners, not attachments
+
+
+@app.post("/v1/images")
+async def upload_image(
+    file: UploadFile = File(...),
+    user=Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Accept an image upload, store it in the DB, and return its public URL.
+
+    The URL is stable across restarts (bytes live in Postgres), so it can be used
+    as an <img src> in outgoing emails.
+    """
+    ctype = (file.content_type or "").lower()
+    if ctype not in _ALLOWED_IMAGE_TYPES:
+        raise HTTPException(status_code=422, detail="Image must be PNG, JPEG, GIF, or WEBP.")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=422, detail="Empty file.")
+    if len(data) > _MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=422, detail="Image is too large (max 2 MB).")
+
+    img = Image(
+        id=secrets.token_hex(12),
+        user_id=int(user["uid"]),
+        content_type=ctype,
+        data=data,
+    )
+    session.add(img)
+    await session.commit()
+
+    # Absolute URL so external email clients can load it.
+    base = backend_base_url()
+    return {"url": f"{base}/v1/images/{img.id}", "id": img.id}
+
+
+@app.get("/v1/images/{image_id}")
+async def get_image(image_id: str, session: AsyncSession = Depends(get_session)):
+    """Public: serve a stored image by id (used as <img src> in emails)."""
+    img = (
+        await session.execute(select(Image).where(Image.id == image_id))
+    ).scalar_one_or_none()
+    if img is None:
+        raise HTTPException(status_code=404, detail="Image not found")
+    return Response(
+        content=img.data,
+        media_type=img.content_type,
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
 
 @app.post("/v1/keys")
 async def create_key(
